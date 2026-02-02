@@ -5,73 +5,48 @@ import json
 import datetime
 import csv
 import os
+import asyncio
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
+logger = logging.getLogger(__name__)
 
-AUTH_LOGIN, AUTH_PASSWORD, REPORT_TEXT, HISTORY_COUNT, CHECK_NICK = range(5)
+# Состояния диалога
+AUTH_LOGIN, AUTH_PASSWORD = range(2)
 
-# ПРАВИЛЬНОЕ ОПРЕДЕЛЕНИЕ ДАННЫХ ДЛЯ АВТОРИЗАЦИИ
-VALID_CREDENTIALS = {
-    "test": "12345",
-    "test1": "12345",
-    "test2": "12345"
-}
+VALID_CREDENTIALS = {"test": "12345"}
 
-USERS_FILE = "users.json"
-NICKS_FILE = "nicks.json"
-REPORTS_FILE = "reports.json"
+USERS_FILE = "user.json"
+NICKS_FILE = "Nicks.json" 
+REPORTS_FILE = "report.json"
 
-# ИСПРАВЛЕННАЯ ФУНКЦИЯ ЗАГРУЗКИ
-def load_data(filename, default_value):
-    """
-    Загружает данные из JSON файла.
-    Если файл не существует или пуст, возвращает default_value.
-    """
+def load_data(filename):
     try:
-        # Проверяем, существует ли файл
         if not os.path.exists(filename):
-            print(f"Файл {filename} не найден, создаю с дефолтными значениями...")
-            save_data(filename, default_value)
-            return default_value
+            print(f"Файл {filename} не найден, создаю пустой...")
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump({}, f, ensure_ascii=False, indent=2)
+            return {}
         
-        # Проверяем, не пустой ли файл
-        if os.path.getsize(filename) == 0:
-            print(f"Файл {filename} пустой, создаю заново...")
-            save_data(filename, default_value)
-            return default_value
-        
-        # Пытаемся загрузить JSON
         with open(filename, 'r', encoding='utf-8') as f:
             data = json.load(f)
-            print(f"Успешно загружено из {filename}: {type(data)}")
+            print(f"Успешно загружено из файла {filename}: {type(data)}")
             return data
-            
-    except json.JSONDecodeError as e:
-        print(f"Ошибка JSON в файле {filename}: {e}. Создаю новый файл...")
-        save_data(filename, default_value)
-        return default_value
     except Exception as e:
-        print(f"Ошибка при загрузке {filename}: {e}")
-        return default_value
+        print(f"Ошибка загрузки {filename}: {e}")
+        return {}
 
 def save_data(filename, data):
-    """Сохраняет данные в JSON файл"""
-    try:
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        print(f"Данные сохранены в {filename}")
-    except Exception as e:
-        print(f"Ошибка при сохранении {filename}: {e}")
+    with open(filename, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-# ЗАГРУЗКА ДАННЫХ С ДЕФОЛТНЫМИ ЗНАЧЕНИЯМИ
+# Загружаем данные
 print("Загрузка данных...")
-authorized_users = load_data(USERS_FILE, {})
-nicks_database = load_data(NICKS_FILE, {})
-reports_database = load_data(REPORTS_FILE, {})
-
+authorized_users = load_data(USERS_FILE)
+nicks_database = load_data(NICKS_FILE)
+reports_database = load_data(REPORTS_FILE)
 print(f"Загружено: {len(authorized_users)} пользователей, {len(nicks_database)} ников, {len(reports_database)} отчетов")
 
 def get_main_menu():
@@ -83,21 +58,20 @@ def get_main_menu():
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-def get_nick_check_menu():
-    keyboard = [
-        [KeyboardButton("↩️ Назад в меню")]
-    ]
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     
     if user_id in authorized_users:
-        await update.message.reply_text("✅ Вы уже авторизованы!", reply_markup=get_main_menu())
-        return ConversationHandler.END
+        await update.message.reply_text(
+            "✅ Вы уже авторизованы!",
+            reply_markup=get_main_menu()
+        )
     else:
-        await update.message.reply_text("🔐 Для использования бота требуется авторизация.\nВведите ваш логин:")
+        await update.message.reply_text(
+            "🔐 Для использования бота требуется авторизация.\nВведите ваш логин:"
+        )
         return AUTH_LOGIN
+    return ConversationHandler.END
 
 async def auth_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['login'] = update.message.text
@@ -119,69 +93,47 @@ async def auth_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         save_data(USERS_FILE, authorized_users)
         
-        await update.message.reply_text("✅ Вы успешно авторизованы!", reply_markup=get_main_menu())
+        await update.message.reply_text(
+            "✅ Вы успешно авторизованы!",
+            reply_markup=get_main_menu()
+        )
         return ConversationHandler.END
     else:
-        await update.message.reply_text("❌ Неверный логин или пароль. Попробуйте снова.\nВведите ваш логин:")
-        return AUTH_LOGIN
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-    text = update.message.text
-    
-    if user_id not in authorized_users:
-        await update.message.reply_text("❌ Требуется авторизация. Используйте /start")
-        return ConversationHandler.END
-    
-    if text == "🔍 Проверка ников":
         await update.message.reply_text(
-            "Введите ник для проверки:\n(или нажмите '↩️ Назад в меню' для возврата)",
-            reply_markup=get_nick_check_menu()
+            "❌ Неверный логин или пароль. Попробуйте снова.\nВведите ваш логин:"
         )
-        return CHECK_NICK
-        
-    elif text == "📊 История ников":
-        await update.message.reply_text("Сколько последних ников показать? Введите число:")
-        return HISTORY_COUNT
-        
-    elif text == "📝 Отправить отчет":
-        await update.message.reply_text("Напишите текст отчета:")
-        return REPORT_TEXT
-        
-    elif text == "❌ Выход":
-        if user_id in authorized_users:
-            del authorized_users[user_id]
-            save_data(USERS_FILE, authorized_users)
-        
-        await update.message.reply_text("👋 Вы вышли из системы. Для входа используйте /start", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/start")]], resize_keyboard=True))
-        return ConversationHandler.END
-    
-    elif text == "↩️ Назад в меню":
-        await update.message.reply_text("Главное меню:", reply_markup=get_main_menu())
-        return ConversationHandler.END
-    
-    await update.message.reply_text("Выберите действие:", reply_markup=get_main_menu())
-    return ConversationHandler.END
+        return AUTH_LOGIN
 
 async def check_nick(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
-    text = update.message.text
     
-    if text == "↩️ Назад в меню":
-        await update.message.reply_text("Главное меню:", reply_markup=get_main_menu())
-        return ConversationHandler.END
+    if user_id not in authorized_users:
+        await update.message.reply_text("❌ Требуется авторизация. Используйте /start")
+        return
     
-    nick = text.strip().lower()
+    nick = update.message.text.strip().lower()
+    
+    if not nick:
+        await update.message.reply_text("❌ Введите корректный ник!", reply_markup=get_main_menu())
+        return
+    
     current_time = datetime.datetime.now().isoformat()
     user_name = authorized_users[user_id]["name"]
     
     if nick in nicks_database:
         nick_info = nicks_database[nick]
+        
         if nick_info["user_id"] == user_id:
-            await update.message.reply_text(f"❌ Ник '{nick}' уже был проверен вами ранее.")
+            await update.message.reply_text(
+                f"❌ Ник '{nick}' уже был проверен вами ранее.",
+                reply_markup=get_main_menu()
+            )
         else:
             other_user = nick_info["user_name"]
-            await update.message.reply_text(f"❌ Ник '{nick}' уже занят пользователем {other_user}.")
+            await update.message.reply_text(
+                f"❌ Ник '{nick}' уже занят пользователем {other_user}.",
+                reply_markup=get_main_menu()
+            )
     else:
         nicks_database[nick] = {
             "user_id": user_id,
@@ -190,58 +142,76 @@ async def check_nick(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         save_data(NICKS_FILE, nicks_database)
         
-        # Сохраняем в CSV с обработкой ошибок
-        try:
-            file_exists = os.path.isfile('nicks_history.csv')
-            with open('nicks_history.csv', 'a', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                if not file_exists:
-                    writer.writerow(['Ник', 'Менеджер', 'ID менеджера', 'Дата проверки'])
-                writer.writerow([nick, user_name, user_id, current_time])
-        except PermissionError:
-            # Если файл заблокирован, просто пропускаем запись в CSV
-            pass
+        file_exists = os.path.isfile('nicks_history.csv')
+        with open('nicks_history.csv', 'a', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            if not file_exists:
+                writer.writerow(['Ник', 'Менеджер', 'ID менеджера', 'Дата проверки'])
+            writer.writerow([nick, user_name, user_id, current_time])
         
-        await update.message.reply_text(f"✅ Ник '{nick}' свободен и добавлен в базу!")
-    
-    await update.message.reply_text(
-        "Введите следующий ник для проверки:\n(или нажмите '↩️ Назад в меню' для возврата)",
-        reply_markup=get_nick_check_menu()
-    )
-    return CHECK_NICK
+        await update.message.reply_text(
+            f"✅ Ник '{nick}' свободен и добавлен в базу!",
+            reply_markup=get_main_menu()
+        )
 
-async def handle_history_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        count = int(update.message.text)
-        if count <= 0:
-            await update.message.reply_text("❌ Введите положительное число!")
-            return HISTORY_COUNT
+async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+    text = update.message.text
+    
+    if user_id not in authorized_users:
+        await update.message.reply_text("❌ Требуется авторизация. Используйте /start")
+        return
+    
+    if text == "🔍 Проверка ников":
+        await update.message.reply_text("Введите ник для проверки:")
+        context.user_data['waiting_for_nick'] = True
         
-        all_nicks = list(nicks_database.items())
-        all_nicks.sort(key=lambda x: x[1]["check_date"], reverse=True)
-        
-        recent_nicks = all_nicks[:count]
-        
-        if not recent_nicks:
-            await update.message.reply_text("📭 В базе нет ников.")
-        else:
-            response = f"📋 Последние {len(recent_nicks)} ников:\n\n"
-            for i, (nick, info) in enumerate(recent_nicks, 1):
-                date = info['check_date'][:16].replace('T', ' ')
-                response += f"{i}. {nick} - {info['user_name']} ({date})\n"
+    elif text == "📊 История ников":
+        try:
+            all_nicks = list(nicks_database.items())
+            all_nicks.sort(key=lambda x: x[1].get("check_date", ""), reverse=True)
             
-            await update.message.reply_text(response)
+            recent_nicks = all_nicks[:10]
+            
+            if not recent_nicks:
+                await update.message.reply_text("📭 В базе нет ников.", reply_markup=get_main_menu())
+            else:
+                response = f"📋 Последние {len(recent_nicks)} ников:\n\n"
+                for i, (nick, info) in enumerate(recent_nicks, 1):
+                    date = info.get('check_date', 'N/A')[:10]
+                    response += f"{i}. {nick} - {info.get('user_name', 'N/A')} ({date})\n"
+                
+                await update.message.reply_text(response, reply_markup=get_main_menu())
+        except Exception as e:
+            await update.message.reply_text(f"❌ Ошибка: {str(e)}", reply_markup=get_main_menu())
         
-        await update.message.reply_text("Главное меню:", reply_markup=get_main_menu())
-        return ConversationHandler.END
+    elif text == "📝 Отправить отчет":
+        await update.message.reply_text("Напишите текст отчета:")
+        context.user_data['waiting_for_report'] = True
         
-    except ValueError:
-        await update.message.reply_text("❌ Пожалуйста, введите число!")
-        return HISTORY_COUNT
+    elif text == "❌ Выход":
+        if user_id in authorized_users:
+            del authorized_users[user_id]
+            save_data(USERS_FILE, authorized_users)
+        
+        await update.message.reply_text(
+            "👋 Вы вышли из системы. Для входа используйте /start",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/start")]], resize_keyboard=True)
+        )
 
 async def handle_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
-    report_text = update.message.text
+    
+    if user_id not in authorized_users:
+        await update.message.reply_text("❌ Требуется авторизация. Используйте /start")
+        return
+    
+    report_text = update.message.text.strip()
+    
+    if not report_text:
+        await update.message.reply_text("❌ Отчет не может быть пустым!", reply_markup=get_main_menu())
+        return
+    
     user_name = authorized_users[user_id]["name"]
     current_time = datetime.datetime.now().isoformat()
     
@@ -254,37 +224,60 @@ async def handle_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     save_data(REPORTS_FILE, reports_database)
     
-    # Сохраняем в CSV с обработкой ошибок
-    try:
-        file_exists = os.path.isfile('reports_history.csv')
-        with open('reports_history.csv', 'a', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            if not file_exists:
-                writer.writerow(['Менеджер', 'ID менеджера', 'Текст отчета', 'Дата отправки'])
-            truncated_report = report_text[:500] + "..." if len(report_text) > 500 else report_text
-            writer.writerow([user_name, user_id, truncated_report, current_time])
-    except PermissionError:
-        # Если файл заблокирован, просто пропускаем запись в CSV
-        pass
+    file_exists = os.path.isfile('reports_history.csv')
+    with open('reports_history.csv', 'a', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(['Менеджер', 'ID менеджера', 'Текст отчета', 'Дата отправки'])
+        truncated_report = report_text[:500] + "..." if len(report_text) > 500 else report_text
+        writer.writerow([user_name, user_id, truncated_report, current_time])
     
-    await update.message.reply_text("✅ Отчет успешно отправлен!")
-    await update.message.reply_text("Главное меню:", reply_markup=get_main_menu())
-    return ConversationHandler.END
+    await update.message.reply_text(
+        "✅ Отчет успешно отправлен!",
+        reply_markup=get_main_menu()
+    )
+    context.user_data.pop('waiting_for_report', None)
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+    
+    if user_id not in authorized_users:
+        await update.message.reply_text("❌ Требуется авторизация. Используйте /start")
+        return
+    
+    text = update.message.text
+    
+    if context.user_data.get('waiting_for_nick'):
+        context.user_data.pop('waiting_for_nick', None)
+        await check_nick(update, context)
+        return
+    
+    if context.user_data.get('waiting_for_report'):
+        context.user_data.pop('waiting_for_report', None)
+        await handle_report(update, context)
+        return
+    
+    if text in ["🔍 Проверка ников", "📊 История ников", "📝 Отправить отчет", "❌ Выход"]:
+        await handle_menu(update, context)
+    else:
+        await update.message.reply_text(
+            "Выберите действие из меню:",
+            reply_markup=get_main_menu()
+        )
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Операция отменена.", reply_markup=get_main_menu())
-    return ConversationHandler.END
+    await update.message.reply_text(
+        "Операция отменена.",
+        reply_markup=get_main_menu()
+    )
+    context.user_data.pop('waiting_for_nick', None)
+    context.user_data.pop('waiting_for_report', None)
 
 def main():
-    # ВАЖНО: Создаем файлы если их нет
-    if not os.path.exists(USERS_FILE):
-        save_data(USERS_FILE, {})
-    if not os.path.exists(NICKS_FILE):
-        save_data(NICKS_FILE, {})
-    if not os.path.exists(REPORTS_FILE):
-        save_data(REPORTS_FILE, {})
+    # Токен бота - ЗАМЕНИ на свой!
+    TOKEN = "8199840666:AAEMBSi3Y-SIN8cQqnBVso2B7fCKh7fb-Uk"
     
-    application = Application.builder().token("8199840666:AAEMBSi3Y-SIN8cQqnBVso2B7fCKh7fb-Uk").build()
+    application = Application.builder().token(TOKEN).build()
     
     auth_conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
@@ -295,20 +288,22 @@ def main():
         fallbacks=[CommandHandler('cancel', cancel)]
     )
     
-    menu_conv_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)],
-        states={
-            CHECK_NICK: [MessageHandler(filters.TEXT & ~filters.COMMAND, check_nick)],
-            HISTORY_COUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_history_count)],
-            REPORT_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_report)],
-        },
-        fallbacks=[CommandHandler('cancel', cancel)]
-    )
+    cancel_handler = CommandHandler('cancel', cancel)
+    text_handler = MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text)
     
     application.add_handler(auth_conv_handler)
-    application.add_handler(menu_conv_handler)
+    application.add_handler(cancel_handler)
+    application.add_handler(text_handler)
     
-    print("Бот запущен...")
+    print("=" * 50)
+    print("Бот запущен!")
+    print("=" * 50)
+    print("Тестирование:")
+    print("1. Откройте Telegram")
+    print("2. Найдите @fatherNiki_bot")
+    print("3. Отправьте /start")
+    print("=" * 50)
+    
     application.run_polling()
 
 if __name__ == '__main__':
