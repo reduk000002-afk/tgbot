@@ -275,7 +275,8 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     # Токен бота - ЗАМЕНИ на свой!
-    TOKEN = "8199840666:AAEMBSi3Y-SIN8cQqnBVso2B7fCKh7fb-Uk"
+    import os
+    TOKEN = os.getenv("BOT_TOKEN", "твой_новый_токен_здесь")
     
     application = Application.builder().token(TOKEN).build()
     
