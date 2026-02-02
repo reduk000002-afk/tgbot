@@ -9,7 +9,7 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-TOKEN = os.getenv("8199840666:AAEMBSi3Y-SIN8cQqnBVso2B7fCKh7fb-Uk")
+TOKEN = os.getenv("BOT_TOKEN", "8199840666:AAEMBSi3Y-SIN8cQqnBVso2B7fCKh7fb-Uk")
 
 # Для версии 13.15
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
@@ -270,3 +270,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
