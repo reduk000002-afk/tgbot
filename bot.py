@@ -1,17 +1,19 @@
+import os
 import logging
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 import json
 import datetime
 import csv
-import os
-import asyncio
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
-logger = logging.getLogger(__name__)
+
+TOKEN = os.getenv("8199840666:AAEMBSi3Y-SIN8cQqnBVso2B7fCKh7fb-Uk")
+
+# Для версии 13.15
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler, CallbackContext
 
 # Состояния диалога
 AUTH_LOGIN, AUTH_PASSWORD = range(2)
@@ -42,43 +44,33 @@ def save_data(filename, data):
     with open(filename, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-# Загружаем данные
-print("Загрузка данных...")
 authorized_users = load_data(USERS_FILE)
 nicks_database = load_data(NICKS_FILE)
 reports_database = load_data(REPORTS_FILE)
-print(f"Загружено: {len(authorized_users)} пользователей, {len(nicks_database)} ников, {len(reports_database)} отчетов")
 
 def get_main_menu():
-    keyboard = [
-        [KeyboardButton("🔍 Проверка ников")],
-        [KeyboardButton("📊 История ников")],
-        [KeyboardButton("📝 Отправить отчет")],
-        [KeyboardButton("❌ Выход")]
-    ]
+    keyboard = [[KeyboardButton("🔍 Проверка ников")],
+                [KeyboardButton("📊 История ников")],
+                [KeyboardButton("📝 Отправить отчет")],
+                [KeyboardButton("❌ Выход")]]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def start(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
     
     if user_id in authorized_users:
-        await update.message.reply_text(
-            "✅ Вы уже авторизованы!",
-            reply_markup=get_main_menu()
-        )
+        update.message.reply_text("✅ Вы уже авторизованы!", reply_markup=get_main_menu())
+        return ConversationHandler.END
     else:
-        await update.message.reply_text(
-            "🔐 Для использования бота требуется авторизация.\nВведите ваш логин:"
-        )
+        update.message.reply_text("🔐 Для использования бота требуется авторизация.\nВведите ваш логин:")
         return AUTH_LOGIN
-    return ConversationHandler.END
 
-async def auth_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def auth_login(update: Update, context: CallbackContext):
     context.user_data['login'] = update.message.text
-    await update.message.reply_text("Введите ваш пароль:")
+    update.message.reply_text("Введите ваш пароль:")
     return AUTH_PASSWORD
 
-async def auth_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def auth_password(update: Update, context: CallbackContext):
     login = context.user_data['login']
     password = update.message.text
     
@@ -93,28 +85,23 @@ async def auth_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         save_data(USERS_FILE, authorized_users)
         
-        await update.message.reply_text(
-            "✅ Вы успешно авторизованы!",
-            reply_markup=get_main_menu()
-        )
+        update.message.reply_text("✅ Вы успешно авторизованы!", reply_markup=get_main_menu())
         return ConversationHandler.END
     else:
-        await update.message.reply_text(
-            "❌ Неверный логин или пароль. Попробуйте снова.\nВведите ваш логин:"
-        )
+        update.message.reply_text("❌ Неверный логин или пароль. Попробуйте снова.\nВведите ваш логин:")
         return AUTH_LOGIN
 
-async def check_nick(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def check_nick(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
     
     if user_id not in authorized_users:
-        await update.message.reply_text("❌ Требуется авторизация. Используйте /start")
+        update.message.reply_text("❌ Требуется авторизация. Используйте /start")
         return
     
     nick = update.message.text.strip().lower()
     
     if not nick:
-        await update.message.reply_text("❌ Введите корректный ник!", reply_markup=get_main_menu())
+        update.message.reply_text("❌ Введите корректный ник!", reply_markup=get_main_menu())
         return
     
     current_time = datetime.datetime.now().isoformat()
@@ -124,16 +111,10 @@ async def check_nick(update: Update, context: ContextTypes.DEFAULT_TYPE):
         nick_info = nicks_database[nick]
         
         if nick_info["user_id"] == user_id:
-            await update.message.reply_text(
-                f"❌ Ник '{nick}' уже был проверен вами ранее.",
-                reply_markup=get_main_menu()
-            )
+            update.message.reply_text(f"❌ Ник '{nick}' уже был проверен вами ранее.", reply_markup=get_main_menu())
         else:
             other_user = nick_info["user_name"]
-            await update.message.reply_text(
-                f"❌ Ник '{nick}' уже занят пользователем {other_user}.",
-                reply_markup=get_main_menu()
-            )
+            update.message.reply_text(f"❌ Ник '{nick}' уже занят пользователем {other_user}.", reply_markup=get_main_menu())
     else:
         nicks_database[nick] = {
             "user_id": user_id,
@@ -149,21 +130,18 @@ async def check_nick(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 writer.writerow(['Ник', 'Менеджер', 'ID менеджера', 'Дата проверки'])
             writer.writerow([nick, user_name, user_id, current_time])
         
-        await update.message.reply_text(
-            f"✅ Ник '{nick}' свободен и добавлен в базу!",
-            reply_markup=get_main_menu()
-        )
+        update.message.reply_text(f"✅ Ник '{nick}' свободен и добавлен в базу!", reply_markup=get_main_menu())
 
-async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def handle_menu(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
     text = update.message.text
     
     if user_id not in authorized_users:
-        await update.message.reply_text("❌ Требуется авторизация. Используйте /start")
+        update.message.reply_text("❌ Требуется авторизация. Используйте /start")
         return
     
     if text == "🔍 Проверка ников":
-        await update.message.reply_text("Введите ник для проверки:")
+        update.message.reply_text("Введите ник для проверки:")
         context.user_data['waiting_for_nick'] = True
         
     elif text == "📊 История ников":
@@ -174,19 +152,19 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             recent_nicks = all_nicks[:10]
             
             if not recent_nicks:
-                await update.message.reply_text("📭 В базе нет ников.", reply_markup=get_main_menu())
+                update.message.reply_text("📭 В базе нет ников.", reply_markup=get_main_menu())
             else:
                 response = f"📋 Последние {len(recent_nicks)} ников:\n\n"
                 for i, (nick, info) in enumerate(recent_nicks, 1):
                     date = info.get('check_date', 'N/A')[:10]
                     response += f"{i}. {nick} - {info.get('user_name', 'N/A')} ({date})\n"
                 
-                await update.message.reply_text(response, reply_markup=get_main_menu())
+                update.message.reply_text(response, reply_markup=get_main_menu())
         except Exception as e:
-            await update.message.reply_text(f"❌ Ошибка: {str(e)}", reply_markup=get_main_menu())
+            update.message.reply_text(f"❌ Ошибка: {str(e)}", reply_markup=get_main_menu())
         
     elif text == "📝 Отправить отчет":
-        await update.message.reply_text("Напишите текст отчета:")
+        update.message.reply_text("Напишите текст отчета:")
         context.user_data['waiting_for_report'] = True
         
     elif text == "❌ Выход":
@@ -194,22 +172,20 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             del authorized_users[user_id]
             save_data(USERS_FILE, authorized_users)
         
-        await update.message.reply_text(
-            "👋 Вы вышли из системы. Для входа используйте /start",
-            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/start")]], resize_keyboard=True)
-        )
+        update.message.reply_text("👋 Вы вышли из системы. Для входа используйте /start",
+                                reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/start")]], resize_keyboard=True))
 
-async def handle_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def handle_report(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
     
     if user_id not in authorized_users:
-        await update.message.reply_text("❌ Требуется авторизация. Используйте /start")
+        update.message.reply_text("❌ Требуется авторизация. Используйте /start")
         return
     
     report_text = update.message.text.strip()
     
     if not report_text:
-        await update.message.reply_text("❌ Отчет не может быть пустым!", reply_markup=get_main_menu())
+        update.message.reply_text("❌ Отчет не может быть пустым!", reply_markup=get_main_menu())
         return
     
     user_name = authorized_users[user_id]["name"]
@@ -232,80 +208,65 @@ async def handle_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         truncated_report = report_text[:500] + "..." if len(report_text) > 500 else report_text
         writer.writerow([user_name, user_id, truncated_report, current_time])
     
-    await update.message.reply_text(
-        "✅ Отчет успешно отправлен!",
-        reply_markup=get_main_menu()
-    )
+    update.message.reply_text("✅ Отчет успешно отправлен!", reply_markup=get_main_menu())
     context.user_data.pop('waiting_for_report', None)
 
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def handle_text(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
     
     if user_id not in authorized_users:
-        await update.message.reply_text("❌ Требуется авторизация. Используйте /start")
+        update.message.reply_text("❌ Требуется авторизация. Используйте /start")
         return
     
     text = update.message.text
     
     if context.user_data.get('waiting_for_nick'):
         context.user_data.pop('waiting_for_nick', None)
-        await check_nick(update, context)
+        check_nick(update, context)
         return
     
     if context.user_data.get('waiting_for_report'):
         context.user_data.pop('waiting_for_report', None)
-        await handle_report(update, context)
+        handle_report(update, context)
         return
     
     if text in ["🔍 Проверка ников", "📊 История ников", "📝 Отправить отчет", "❌ Выход"]:
-        await handle_menu(update, context)
+        handle_menu(update, context)
     else:
-        await update.message.reply_text(
-            "Выберите действие из меню:",
-            reply_markup=get_main_menu()
-        )
+        update.message.reply_text("Выберите действие из меню:", reply_markup=get_main_menu())
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Операция отменена.",
-        reply_markup=get_main_menu()
-    )
+def cancel(update: Update, context: CallbackContext):
+    update.message.reply_text("Операция отменена.", reply_markup=get_main_menu())
     context.user_data.pop('waiting_for_nick', None)
     context.user_data.pop('waiting_for_report', None)
 
 def main():
-    # Токен бота - ЗАМЕНИ на свой!
-    import os
-    TOKEN = os.getenv("BOT_TOKEN", "твой_новый_токен_здесь")
+    print(f"Загружено: {len(authorized_users)} пользователей, {len(nicks_database)} ников, {len(reports_database)} отчетов")
     
-    application = Application.builder().token(TOKEN).build()
+    # Для версии 13.15 используем Updater
+    updater = Updater(TOKEN, use_context=True)
+    dp = updater.dispatcher
     
+    # Обработчик авторизации
     auth_conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
         states={
-            AUTH_LOGIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, auth_login)],
-            AUTH_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, auth_password)],
+            AUTH_LOGIN: [MessageHandler(Filters.text, auth_login)],
+            AUTH_PASSWORD: [MessageHandler(Filters.text, auth_password)],
         },
         fallbacks=[CommandHandler('cancel', cancel)]
     )
     
-    cancel_handler = CommandHandler('cancel', cancel)
-    text_handler = MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text)
-    
-    application.add_handler(auth_conv_handler)
-    application.add_handler(cancel_handler)
-    application.add_handler(text_handler)
+    dp.add_handler(auth_conv_handler)
+    dp.add_handler(CommandHandler('cancel', cancel))
+    dp.add_handler(MessageHandler(Filters.text, handle_text))
     
     print("=" * 50)
     print("Бот запущен!")
     print("=" * 50)
-    print("Тестирование:")
-    print("1. Откройте Telegram")
-    print("2. Найдите @fatherNiki_bot")
-    print("3. Отправьте /start")
-    print("=" * 50)
     
-    application.run_polling()
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == '__main__':
     main()
