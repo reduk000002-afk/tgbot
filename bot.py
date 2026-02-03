@@ -9,7 +9,7 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# Токен бота - ОСТАВЬ ЭТОТ ТОКЕН!
+# Токен бота
 TOKEN = "8199840666:AAEMBSi3Y-SIN8cQqnBVso2B7fCKh7fb-Uk"
 
 # Для версии 13.15
@@ -110,7 +110,7 @@ def check_nick(update: Update, context: CallbackContext):
     nick = update.message.text.strip().lower()
     
     if not nick:
-        update.message.reply_text("❌ Введите корректный ник!", reply_markup=get_main_menu())
+        update.message.reply_text("❌ Введите корректный ник!")
         return
     
     current_time = datetime.datetime.now().isoformat()
@@ -120,10 +120,10 @@ def check_nick(update: Update, context: CallbackContext):
         nick_info = nicks_database[nick]
         
         if nick_info["user_id"] == user_id:
-            update.message.reply_text(f"❌ Ник '{nick}' уже был проверен вами ранее.", reply_markup=get_main_menu())
+            update.message.reply_text(f"❌ Ник '{nick}' уже был проверен вами ранее.")
         else:
             other_user = nick_info["user_name"]
-            update.message.reply_text(f"❌ Ник '{nick}' уже занят пользователем {other_user}.", reply_markup=get_main_menu())
+            update.message.reply_text(f"❌ Ник '{nick}' уже занят пользователем {other_user}.")
     else:
         nicks_database[nick] = {
             "user_id": user_id,
@@ -139,10 +139,7 @@ def check_nick(update: Update, context: CallbackContext):
                 writer.writerow(['Ник', 'Менеджер', 'ID менеджера', 'Дата проверки'])
             writer.writerow([nick, user_name, user_id, current_time])
         
-        update.message.reply_text(f"✅ Ник '{nick}' свободен и добавлен в базу!", reply_markup=get_main_menu())
-    
-    # После проверки ника ОСТАЕМСЯ в режиме проверки ников
-    # Ждем следующий ник или команду меню
+        update.message.reply_text(f"✅ Ник '{nick}' свободен и добавлен в базу!")
 
 def handle_menu(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
@@ -172,8 +169,10 @@ def handle_menu(update: Update, context: CallbackContext):
                     response += f"{i}. {nick} - {info.get('user_name', 'N/A')} ({date})\n"
                 
                 update.message.reply_text(response, reply_markup=get_main_menu())
+                context.user_data.pop('mode', None)  # Выходим из режима
         except Exception as e:
             update.message.reply_text(f"❌ Ошибка: {str(e)}", reply_markup=get_main_menu())
+            context.user_data.pop('mode', None)
         
     elif text == "📝 Отправить отчет":
         update.message.reply_text("Напишите текст отчета:")
@@ -198,7 +197,7 @@ def handle_report(update: Update, context: CallbackContext):
     report_text = update.message.text.strip()
     
     if not report_text:
-        update.message.reply_text("❌ Отчет не может быть пустым!", reply_markup=get_main_menu())
+        update.message.reply_text("❌ Отчет не может быть пустым!")
         return
     
     user_name = authorized_users[user_id]["name"]
@@ -226,25 +225,29 @@ def handle_report(update: Update, context: CallbackContext):
 
 def handle_text(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
+    text = update.message.text
     
-    # Проверяем авторизацию для ВСЕХ сообщений
+    # Проверяем авторизацию
     if user_id not in authorized_users:
+        # Если это команда меню без авторизации
+        if text in ["🔍 Проверка ников", "📊 История ников", "📝 Отправить отчет", "❌ Выход"]:
+            update.message.reply_text("❌ Требуется авторизация. Используйте /start")
+            return
+        # Если обычный текст
         update.message.reply_text("❌ Требуется авторизация. Используйте /start")
         return
-    
-    text = update.message.text
     
     # Проверяем режим работы
     mode = context.user_data.get('mode')
     
     if mode == 'check_nick':
-        # В режиме проверки ников - проверяем ник
+        # В режиме проверки ников
         check_nick(update, context)
-        # Остаемся в этом режиме для следующего ника
+        # Остаемся в этом режиме
         return
     
     elif mode == 'report':
-        # В режиме отправки отчета - отправляем отчет
+        # В режиме отправки отчета
         handle_report(update, context)
         return
     
@@ -254,6 +257,7 @@ def handle_text(update: Update, context: CallbackContext):
     else:
         # Если обычный текст без режима
         update.message.reply_text("Выберите действие из меню:", reply_markup=get_main_menu())
+        context.user_data.pop('mode', None)
 
 def cancel(update: Update, context: CallbackContext):
     update.message.reply_text("Операция отменена.", reply_markup=get_main_menu())
@@ -263,9 +267,9 @@ def main():
     print("БОТ ЗАПУЩЕН!")
     print("Токен: 8199840666:AAEMBSi3Y-SIN8cQqnBVso2B7fCKh7fb-Uk")
     print("Volume: /data/")
+    print("Логин: test | Пароль: 12345")
     print("=" * 50)
     
-    # Для версии 13.15 используем Updater
     updater = Updater(TOKEN, use_context=True)
     dp = updater.dispatcher
     
