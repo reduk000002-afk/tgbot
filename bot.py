@@ -16,10 +16,9 @@ TOKEN = "8199840666:AAEMBSi3Y-SIN8cQqnBVso2B7fCKh7fb-Uk"
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler, CallbackContext
 
-# Состояния диалога
-AUTH_LOGIN, AUTH_PASSWORD = range(2)
-
-VALID_CREDENTIALS = {"test": "12345"}
+# Логин и пароль
+VALID_LOGIN = "test"
+VALID_PASSWORD = "12345"
 
 # ПУТИ для Railway Volume
 USERS_FILE = "/data/user.json"
@@ -38,7 +37,6 @@ def load_data(filename):
         
         with open(filename, 'r', encoding='utf-8') as f:
             data = json.load(f)
-            print(f"Успешно загружено из файла {filename}")
             return data
     except Exception as e:
         print(f"Ошибка загрузки {filename}: {e}")
@@ -51,7 +49,7 @@ def save_data(filename, data):
 # Загружаем данные
 print("=" * 50)
 print("Загрузка данных из Volume...")
-authorized_users = load_data(USERS_FILE)
+authorized_users = load_data(USERS_FILE)  # Сюда записываем авторизованных
 nicks_database = load_data(NICKS_FILE)
 reports_database = load_data(REPORTS_FILE)
 print(f"Загружено: {len(authorized_users)} пользователей, {len(nicks_database)} ников, {len(reports_database)} отчетов")
@@ -64,47 +62,48 @@ def get_main_menu():
                 [KeyboardButton("❌ Выход")]]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
+# Простой обработчик команды /start
 def start(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
+    user_name = update.effective_user.full_name
     
     if user_id in authorized_users:
         update.message.reply_text("✅ Вы уже авторизованы!", reply_markup=get_main_menu())
-        return ConversationHandler.END
     else:
-        update.message.reply_text("🔐 Для использования бота требуется авторизация.\nВведите ваш логин:")
-        return AUTH_LOGIN
+        # Просим логин и пароль сразу
+        update.message.reply_text("🔐 Для использования бота требуется авторизация.\n\nОтправьте логин и пароль в формате:\nлогин:пароль\n\nНапример: test:12345")
 
-def auth_login(update: Update, context: CallbackContext):
-    context.user_data['login'] = update.message.text
-    update.message.reply_text("Введите ваш пароль:")
-    return AUTH_PASSWORD
-
-def auth_password(update: Update, context: CallbackContext):
-    login = context.user_data['login']
-    password = update.message.text
+def handle_auth(update: Update, context: CallbackContext):
+    user_id = str(update.effective_user.id)
+    user_name = update.effective_user.full_name
+    text = update.message.text
     
-    if login in VALID_CREDENTIALS and VALID_CREDENTIALS[login] == password:
-        user_id = str(update.effective_user.id)
-        user_name = update.effective_user.full_name
-        
-        authorized_users[user_id] = {
-            "login": login,
-            "name": user_name,
-            "auth_date": datetime.datetime.now().isoformat()
-        }
-        save_data(USERS_FILE, authorized_users)
-        
-        update.message.reply_text("✅ Вы успешно авторизованы!", reply_markup=get_main_menu())
-        return ConversationHandler.END
-    else:
-        update.message.reply_text("❌ Неверный логин или пароль. Попробуйте снова.\nВведите ваш логин:")
-        return AUTH_LOGIN
+    if ":" in text:
+        parts = text.split(":", 1)
+        if len(parts) == 2:
+            login = parts[0].strip()
+            password = parts[1].strip()
+            
+            if login == VALID_LOGIN and password == VALID_PASSWORD:
+                authorized_users[user_id] = {
+                    "login": login,
+                    "name": user_name,
+                    "auth_date": datetime.datetime.now().isoformat()
+                }
+                save_data(USERS_FILE, authorized_users)
+                update.message.reply_text("✅ Вы успешно авторизованы!", reply_markup=get_main_menu())
+                return
+            else:
+                update.message.reply_text("❌ Неверный логин или пароль. Попробуйте снова в формате:\nлогин:пароль")
+                return
+    
+    update.message.reply_text("❌ Неверный формат. Отправьте логин и пароль в формате:\nлогин:пароль")
 
 def check_nick(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
     
     if user_id not in authorized_users:
-        update.message.reply_text("❌ Требуется авторизация. Используйте /start")
+        update.message.reply_text("❌ Требуется авторизация. Отправьте /start")
         return
     
     nick = update.message.text.strip().lower()
@@ -146,7 +145,7 @@ def handle_menu(update: Update, context: CallbackContext):
     text = update.message.text
     
     if user_id not in authorized_users:
-        update.message.reply_text("❌ Требуется авторизация. Используйте /start")
+        update.message.reply_text("❌ Требуется авторизация. Отправьте /start")
         return
     
     if text == "🔍 Проверка ников":
@@ -169,7 +168,7 @@ def handle_menu(update: Update, context: CallbackContext):
                     response += f"{i}. {nick} - {info.get('user_name', 'N/A')} ({date})\n"
                 
                 update.message.reply_text(response, reply_markup=get_main_menu())
-                context.user_data.pop('mode', None)  # Выходим из режима
+                context.user_data.pop('mode', None)
         except Exception as e:
             update.message.reply_text(f"❌ Ошибка: {str(e)}", reply_markup=get_main_menu())
             context.user_data.pop('mode', None)
@@ -191,7 +190,7 @@ def handle_report(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
     
     if user_id not in authorized_users:
-        update.message.reply_text("❌ Требуется авторизация. Используйте /start")
+        update.message.reply_text("❌ Требуется авторизация. Отправьте /start")
         return
     
     report_text = update.message.text.strip()
@@ -227,37 +226,34 @@ def handle_text(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
     text = update.message.text
     
-    # Проверяем авторизацию
-    if user_id not in authorized_users:
-        # Если это команда меню без авторизации
-        if text in ["🔍 Проверка ников", "📊 История ников", "📝 Отправить отчет", "❌ Выход"]:
-            update.message.reply_text("❌ Требуется авторизация. Используйте /start")
-            return
-        # Если обычный текст
-        update.message.reply_text("❌ Требуется авторизация. Используйте /start")
+    # Если это кнопки меню
+    if text in ["🔍 Проверка ников", "📊 История ников", "📝 Отправить отчет", "❌ Выход"]:
+        handle_menu(update, context)
+        return
+    
+    # Если есть двоеточие - это попытка авторизации
+    if ":" in text:
+        handle_auth(update, context)
         return
     
     # Проверяем режим работы
     mode = context.user_data.get('mode')
     
+    if user_id not in authorized_users:
+        update.message.reply_text("❌ Требуется авторизация. Отправьте /start")
+        return
+    
     if mode == 'check_nick':
-        # В режиме проверки ников
         check_nick(update, context)
         # Остаемся в этом режиме
         return
     
     elif mode == 'report':
-        # В режиме отправки отчета
         handle_report(update, context)
         return
     
-    # Если это команда меню
-    if text in ["🔍 Проверка ников", "📊 История ников", "📝 Отправить отчет", "❌ Выход"]:
-        handle_menu(update, context)
-    else:
-        # Если обычный текст без режима
-        update.message.reply_text("Выберите действие из меню:", reply_markup=get_main_menu())
-        context.user_data.pop('mode', None)
+    # Если обычный текст без режима
+    update.message.reply_text("Выберите действие из меню:", reply_markup=get_main_menu())
 
 def cancel(update: Update, context: CallbackContext):
     update.message.reply_text("Операция отменена.", reply_markup=get_main_menu())
@@ -273,17 +269,8 @@ def main():
     updater = Updater(TOKEN, use_context=True)
     dp = updater.dispatcher
     
-    # Обработчик авторизации
-    auth_conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
-        states={
-            AUTH_LOGIN: [MessageHandler(Filters.text, auth_login)],
-            AUTH_PASSWORD: [MessageHandler(Filters.text, auth_password)],
-        },
-        fallbacks=[CommandHandler('cancel', cancel)]
-    )
-    
-    dp.add_handler(auth_conv_handler)
+    # Убрали ConversationHandler - теперь простая авторизация
+    dp.add_handler(CommandHandler('start', start))
     dp.add_handler(CommandHandler('cancel', cancel))
     dp.add_handler(MessageHandler(Filters.text, handle_text))
     
