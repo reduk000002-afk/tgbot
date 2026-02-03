@@ -91,7 +91,10 @@ def handle_auth(update: Update, context: CallbackContext):
                     "auth_date": datetime.datetime.now().isoformat()
                 }
                 save_data(USERS_FILE, authorized_users)
-                update.message.reply_text("✅ Вы успешно авторизованы!", reply_markup=get_main_menu())
+                
+                # ✅ СООБЩЕНИЕ ОБ УСПЕШНОЙ АВТОРИЗАЦИИ
+                welcome_msg = f"✅ Вы успешно авторизованы!\n👤 Менеджер: {user_name}\n🔑 Логин: {login}"
+                update.message.reply_text(welcome_msg, reply_markup=get_main_menu())
                 return
             else:
                 update.message.reply_text("❌ Неверный логин или пароль. Попробуйте снова в формате:\nлогин:пароль")
@@ -138,7 +141,9 @@ def check_nick(update: Update, context: CallbackContext):
                 writer.writerow(['Ник', 'Менеджер', 'ID менеджера', 'Дата проверки'])
             writer.writerow([nick, user_name, user_id, current_time])
         
-        update.message.reply_text(f"✅ Ник '{nick}' свободен и добавлен в базу!")
+        # ✅ ИСПРАВЛЕННОЕ СООБЩЕНИЕ
+        success_msg = f"✅ Ник '{nick}' свободен и закреплен за вами!\n\n👤 Менеджер: {user_name}\n📅 Дата: {current_time[:10]}"
+        update.message.reply_text(success_msg)
 
 def handle_menu(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
@@ -179,11 +184,17 @@ def handle_menu(update: Update, context: CallbackContext):
         
     elif text == "❌ Выход":
         if user_id in authorized_users:
+            user_name = authorized_users[user_id]["name"]
             del authorized_users[user_id]
             save_data(USERS_FILE, authorized_users)
+            
+            exit_msg = f"👋 Вы вышли из системы, {user_name}!\nДля входа используйте /start"
+            update.message.reply_text(exit_msg,
+                                    reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/start")]], resize_keyboard=True))
+        else:
+            update.message.reply_text("👋 Для входа используйте /start",
+                                    reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/start")]], resize_keyboard=True))
         
-        update.message.reply_text("👋 Вы вышли из системы. Для входа используйте /start",
-                                reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/start")]], resize_keyboard=True))
         context.user_data.pop('mode', None)
 
 def handle_report(update: Update, context: CallbackContext):
@@ -219,7 +230,8 @@ def handle_report(update: Update, context: CallbackContext):
         truncated_report = report_text[:500] + "..." if len(report_text) > 500 else report_text
         writer.writerow([user_name, user_id, truncated_report, current_time])
     
-    update.message.reply_text("✅ Отчет успешно отправлен!", reply_markup=get_main_menu())
+    success_msg = f"✅ Отчет успешно отправлен!\n👤 Отправитель: {user_name}\n📅 Дата: {current_time[:10]}"
+    update.message.reply_text(success_msg, reply_markup=get_main_menu())
     context.user_data.pop('mode', None)
 
 def handle_text(update: Update, context: CallbackContext):
@@ -260,8 +272,9 @@ def cancel(update: Update, context: CallbackContext):
     context.user_data.pop('mode', None)
 
 def main():
+    print("=" * 50)
     print("БОТ ЗАПУЩЕН!")
-    print("Токен: 8199840666:AAEMBSi3Y-SIN8cQqnBVso2B7fCKh7fb-Uk")
+    print(f"Токен: {TOKEN[:15]}...")
     print("Volume: /data/")
     print("Логин: test | Пароль: 12345")
     print("=" * 50)
