@@ -9,7 +9,8 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-TOKEN = os.getenv("BOT_TOKEN", "8199840666:AAEMBSi3Y-SIN8cQqnBVso2B7fCKh7fb-Uk")
+# Токен бота - ОСТАВЬ ЭТОТ ТОКЕН!
+TOKEN = "8199840666:AAEMBSi3Y-SIN8cQqnBVso2B7fCKh7fb-Uk"
 
 # Для версии 13.15
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
@@ -20,9 +21,12 @@ AUTH_LOGIN, AUTH_PASSWORD = range(2)
 
 VALID_CREDENTIALS = {"test": "12345"}
 
-USERS_FILE = "user.json"
-NICKS_FILE = "Nicks.json" 
-REPORTS_FILE = "report.json"
+# ПУТИ для Railway Volume
+USERS_FILE = "/data/user.json"
+NICKS_FILE = "/data/Nicks.json" 
+REPORTS_FILE = "/data/report.json"
+NICKS_CSV = "/data/nicks_history.csv"
+REPORTS_CSV = "/data/reports_history.csv"
 
 def load_data(filename):
     try:
@@ -34,7 +38,7 @@ def load_data(filename):
         
         with open(filename, 'r', encoding='utf-8') as f:
             data = json.load(f)
-            print(f"Успешно загружено из файла {filename}: {type(data)}")
+            print(f"Успешно загружено из файла {filename}")
             return data
     except Exception as e:
         print(f"Ошибка загрузки {filename}: {e}")
@@ -44,9 +48,14 @@ def save_data(filename, data):
     with open(filename, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+# Загружаем данные
+print("=" * 50)
+print("Загрузка данных из Volume...")
 authorized_users = load_data(USERS_FILE)
 nicks_database = load_data(NICKS_FILE)
 reports_database = load_data(REPORTS_FILE)
+print(f"Загружено: {len(authorized_users)} пользователей, {len(nicks_database)} ников, {len(reports_database)} отчетов")
+print("=" * 50)
 
 def get_main_menu():
     keyboard = [[KeyboardButton("🔍 Проверка ников")],
@@ -123,8 +132,8 @@ def check_nick(update: Update, context: CallbackContext):
         }
         save_data(NICKS_FILE, nicks_database)
         
-        file_exists = os.path.isfile('nicks_history.csv')
-        with open('nicks_history.csv', 'a', newline='', encoding='utf-8') as f:
+        file_exists = os.path.isfile(NICKS_CSV)
+        with open(NICKS_CSV, 'a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             if not file_exists:
                 writer.writerow(['Ник', 'Менеджер', 'ID менеджера', 'Дата проверки'])
@@ -200,8 +209,8 @@ def handle_report(update: Update, context: CallbackContext):
     }
     save_data(REPORTS_FILE, reports_database)
     
-    file_exists = os.path.isfile('reports_history.csv')
-    with open('reports_history.csv', 'a', newline='', encoding='utf-8') as f:
+    file_exists = os.path.isfile(REPORTS_CSV)
+    with open(REPORTS_CSV, 'a', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         if not file_exists:
             writer.writerow(['Менеджер', 'ID менеджера', 'Текст отчета', 'Дата отправки'])
@@ -241,7 +250,10 @@ def cancel(update: Update, context: CallbackContext):
     context.user_data.pop('waiting_for_report', None)
 
 def main():
-    print(f"Загружено: {len(authorized_users)} пользователей, {len(nicks_database)} ников, {len(reports_database)} отчетов")
+    print("БОТ ЗАПУЩЕН!")
+    print("Токен: 8199840666:AAEMBSi3Y-SIN8cQqnBVso2B7fCKh7fb-Uk")
+    print("Volume: /data/")
+    print("=" * 50)
     
     # Для версии 13.15 используем Updater
     updater = Updater(TOKEN, use_context=True)
@@ -261,13 +273,9 @@ def main():
     dp.add_handler(CommandHandler('cancel', cancel))
     dp.add_handler(MessageHandler(Filters.text, handle_text))
     
-    print("=" * 50)
-    print("Бот запущен!")
-    print("=" * 50)
-    
     updater.start_polling()
+    print("✅ Бот начал работу и ждет сообщений...")
     updater.idle()
 
 if __name__ == '__main__':
     main()
-
