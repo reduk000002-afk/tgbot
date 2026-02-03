@@ -140,6 +140,9 @@ def check_nick(update: Update, context: CallbackContext):
             writer.writerow([nick, user_name, user_id, current_time])
         
         update.message.reply_text(f"✅ Ник '{nick}' свободен и добавлен в базу!", reply_markup=get_main_menu())
+    
+    # После проверки ника ОСТАЕМСЯ в режиме проверки ников
+    # Ждем следующий ник или команду меню
 
 def handle_menu(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
@@ -150,8 +153,8 @@ def handle_menu(update: Update, context: CallbackContext):
         return
     
     if text == "🔍 Проверка ников":
-        update.message.reply_text("Введите ник для проверки:")
-        context.user_data['waiting_for_nick'] = True
+        update.message.reply_text("Введите ник для проверки (можно отправлять несколько подряд):")
+        context.user_data['mode'] = 'check_nick'
         
     elif text == "📊 История ников":
         try:
@@ -174,7 +177,7 @@ def handle_menu(update: Update, context: CallbackContext):
         
     elif text == "📝 Отправить отчет":
         update.message.reply_text("Напишите текст отчета:")
-        context.user_data['waiting_for_report'] = True
+        context.user_data['mode'] = 'report'
         
     elif text == "❌ Выход":
         if user_id in authorized_users:
@@ -183,6 +186,7 @@ def handle_menu(update: Update, context: CallbackContext):
         
         update.message.reply_text("👋 Вы вышли из системы. Для входа используйте /start",
                                 reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/start")]], resize_keyboard=True))
+        context.user_data.pop('mode', None)
 
 def handle_report(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
@@ -218,36 +222,42 @@ def handle_report(update: Update, context: CallbackContext):
         writer.writerow([user_name, user_id, truncated_report, current_time])
     
     update.message.reply_text("✅ Отчет успешно отправлен!", reply_markup=get_main_menu())
-    context.user_data.pop('waiting_for_report', None)
+    context.user_data.pop('mode', None)
 
 def handle_text(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
     
+    # Проверяем авторизацию для ВСЕХ сообщений
     if user_id not in authorized_users:
         update.message.reply_text("❌ Требуется авторизация. Используйте /start")
         return
     
     text = update.message.text
     
-    if context.user_data.get('waiting_for_nick'):
-        context.user_data.pop('waiting_for_nick', None)
+    # Проверяем режим работы
+    mode = context.user_data.get('mode')
+    
+    if mode == 'check_nick':
+        # В режиме проверки ников - проверяем ник
         check_nick(update, context)
+        # Остаемся в этом режиме для следующего ника
         return
     
-    if context.user_data.get('waiting_for_report'):
-        context.user_data.pop('waiting_for_report', None)
+    elif mode == 'report':
+        # В режиме отправки отчета - отправляем отчет
         handle_report(update, context)
         return
     
+    # Если это команда меню
     if text in ["🔍 Проверка ников", "📊 История ников", "📝 Отправить отчет", "❌ Выход"]:
         handle_menu(update, context)
     else:
+        # Если обычный текст без режима
         update.message.reply_text("Выберите действие из меню:", reply_markup=get_main_menu())
 
 def cancel(update: Update, context: CallbackContext):
     update.message.reply_text("Операция отменена.", reply_markup=get_main_menu())
-    context.user_data.pop('waiting_for_nick', None)
-    context.user_data.pop('waiting_for_report', None)
+    context.user_data.pop('mode', None)
 
 def main():
     print("БОТ ЗАПУЩЕН!")
