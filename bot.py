@@ -14,6 +14,7 @@ TOKEN = "8199840666:AAEMBSi3Y-SIN8cQqnBVso2B7fCKh7fb-Uk"
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 
+# Простые настройки
 VALID_LOGIN = "test"
 VALID_PASSWORD = "12345"
 
@@ -39,7 +40,8 @@ def save_data(filename, data):
     with open(filename, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-authorized_users = load_data(USERS_FILE)
+# Загружаем данные
+users_data = load_data(USERS_FILE)  # Здесь храним логины/пароли
 nicks_database = load_data(NICKS_FILE)
 reports_database = load_data(REPORTS_FILE)
 
@@ -52,65 +54,60 @@ def get_main_menu():
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
+# Глобальный словарь для авторизованных пользователей (в памяти)
+authorized_users = {}
+
 def start(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
+    user_name = update.effective_user.full_name
     
+    # Если уже авторизован
     if user_id in authorized_users:
-        update.message.reply_text("✅ Вы уже авторизованы!", reply_markup=get_main_menu())
-    else:
-        update.message.reply_text("🔐 Для использования бота требуется авторизация.\nВведите ваш логин:")
-        # Устанавливаем флаг ожидания логина
-        context.user_data['expecting_login'] = True
-
-def handle_login(update: Update, context: CallbackContext):
-    user_id = str(update.effective_user.id)
-    text = update.message.text.strip()
-    
-    if user_id in authorized_users:
-        # Уже авторизован - показываем меню
-        update.message.reply_text("Выберите действие:", reply_markup=get_main_menu())
+        update.message.reply_text(f"✅ Добро пожаловать, {user_name}!", reply_markup=get_main_menu())
         return
     
-    # Ждем логин
-    if context.user_data.get('expecting_login'):
+    # Начинаем процесс авторизации
+    context.user_data['auth_step'] = 'login'
+    update.message.reply_text("🔐 АВТОРИЗАЦИЯ\n\nВведите логин:")
+
+def handle_auth(update: Update, context: CallbackContext):
+    user_id = str(update.effective_user.id)
+    user_name = update.effective_user.full_name
+    text = update.message.text.strip()
+    
+    # Шаг 1: Ввод логина
+    if context.user_data.get('auth_step') == 'login':
         if text == VALID_LOGIN:
+            context.user_data['auth_step'] = 'password'
             context.user_data['login'] = text
-            context.user_data['expecting_login'] = False
-            context.user_data['expecting_password'] = True
-            update.message.reply_text("🔑 Введите пароль:")
+            update.message.reply_text("Введите пароль:")
         else:
             update.message.reply_text("❌ Неверный логин. Попробуйте снова.\nВведите логин:")
     
-    # Ждем пароль
-    elif context.user_data.get('expecting_password'):
+    # Шаг 2: Ввод пароля
+    elif context.user_data.get('auth_step') == 'password':
         if text == VALID_PASSWORD:
             # УСПЕШНАЯ АВТОРИЗАЦИЯ
-            user_name = update.effective_user.full_name
-            login = context.user_data['login']
-            
             authorized_users[user_id] = {
-                "login": login,
+                "login": context.user_data['login'],
                 "name": user_name,
                 "auth_date": datetime.datetime.now().isoformat()
             }
-            save_data(USERS_FILE, authorized_users)
+            
+            # Сохраняем в файл
+            users_data[user_id] = authorized_users[user_id]
+            save_data(USERS_FILE, users_data)
             
             # Очищаем временные данные
-            context.user_data.pop('expecting_password', None)
-            context.user_data.pop('login', None)
+            context.user_data.clear()
             
             update.message.reply_text(
-                f"✅ Вы успешно авторизованы!\n👤 Менеджер: {user_name}",
+                f"✅ ВЫ УСПЕШНО АВТОРИЗОВАНЫ!\n👤 Менеджер: {user_name}",
                 reply_markup=get_main_menu()
             )
         else:
-            update.message.reply_text("❌ Неверный пароль. Начните заново с /start")
-            # Очищаем все данные
+            update.message.reply_text("❌ Неверный пароль. Начните заново: /start")
             context.user_data.clear()
-    
-    # Ничего не ожидаем, но и не авторизованы
-    elif user_id not in authorized_users:
-        update.message.reply_text("❌ Требуется авторизация. Отправьте /start")
 
 def check_nick(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
@@ -187,14 +184,17 @@ def handle_menu(update: Update, context: CallbackContext):
         
     elif text == "❌ Выход":
         if user_id in authorized_users:
-            del authorized_users[user_id]
-            save_data(USERS_FILE, authorized_users)
+            user_name = authorized_users[user_id]["name"]
+            # Удаляем из активных пользователей
+            if user_id in authorized_users:
+                del authorized_users[user_id]
             
-        update.message.reply_text(
-            "👋 Вы вышли из системы. Для входа используйте /start",
-            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/start")]], resize_keyboard=True)
-        )
-        context.user_data.pop('mode', None)
+            update.message.reply_text(
+                f"👋 До свидания, {user_name}!\nДля входа используйте /start",
+                reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/start")]], resize_keyboard=True)
+            )
+        
+        context.user_data.clear()
 
 def handle_report(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
@@ -235,40 +235,39 @@ def handle_text(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
     text = update.message.text
     
-    # Проверяем, находимся ли мы в процессе авторизации
-    if context.user_data.get('expecting_login') or context.user_data.get('expecting_password'):
-        handle_login(update, context)
+    # Если пользователь в процессе авторизации
+    if 'auth_step' in context.user_data:
+        handle_auth(update, context)
         return
     
     # Если уже авторизован
     if user_id in authorized_users:
-        # Кнопки меню
+        # Проверяем кнопки меню
         if text in ["🔍 Проверка ников", "📊 История ников", "📝 Отправить отчет", "❌ Выход"]:
             handle_menu(update, context)
             return
         
-        # Режимы работы
-        mode = context.user_data.get('mode')
-        
-        if mode == 'check_nick':
+        # Проверяем режим работы
+        if context.user_data.get('mode') == 'check_nick':
             check_nick(update, context)
             return
         
-        elif mode == 'report':
+        if context.user_data.get('mode') == 'report':
             handle_report(update, context)
             return
         
         # Любой другой текст
         update.message.reply_text("Выберите действие из меню:", reply_markup=get_main_menu())
     
-    # Не авторизован и не в процессе авторизации
+    # Не авторизован
     else:
         update.message.reply_text("❌ Требуется авторизация. Отправьте /start")
 
 def main():
     print("=" * 50)
     print("БОТ ЗАПУЩЕН!")
-    print(f"Авторизовано пользователей: {len(authorized_users)}")
+    print(f"Загружено пользователей: {len(users_data)}")
+    print(f"Загружено ников: {len(nicks_database)}")
     print("Логин: test | Пароль: 12345")
     print("=" * 50)
     
