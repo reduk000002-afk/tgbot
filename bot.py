@@ -51,8 +51,8 @@ def save_data(filename, data):
         print(f"Ошибка сохранения {filename}: {e}")
 
 # Загружаем данные
-users_db = load_data(USERS_FILE)  # {user_id: user_data}
-nicks_db = load_data(NICKS_FILE)  # {nick: {user_id, user_name, check_date}}
+users_db = load_data(USERS_FILE)
+nicks_db = load_data(NICKS_FILE)
 reports_db = load_data(REPORTS_FILE)
 
 def get_main_menu():
@@ -266,25 +266,6 @@ def send_report(update: Update, context: CallbackContext):
     )
     return MAIN_MENU
 
-# ========== КОМАНДА СТАТУС ==========
-def status(update: Update, context: CallbackContext):
-    user_id = str(update.effective_user.id)
-    
-    if user_id not in users_db:
-        update.message.reply_text("❌ Требуется авторизация")
-        return
-    
-    info = f"""📊 СТАТУС СИСТЕМЫ:
-
-👤 Авторизованных: {len(users_db)}
-🔤 Ников в базе: {len(nicks_db)}
-📝 Отчетов: {len(reports_db)}
-
-💾 Volume: /data/
-✅ Файлы загружены
-"""
-    update.message.reply_text(info)
-
 # ========== ОТМЕНА ==========
 def cancel(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
@@ -307,7 +288,16 @@ def main():
     print("=" * 60)
     print("✅ Бот запускается...")
     
-    updater = Updater(TOKEN, use_context=True)
+    # Исправляем конфликт
+    updater = Updater(
+        TOKEN, 
+        use_context=True,
+        request_kwargs={
+            'read_timeout': 10,
+            'connect_timeout': 10
+        }
+    )
+    
     dp = updater.dispatcher
     
     # ConversationHandler для управления состояниями
@@ -323,9 +313,21 @@ def main():
     )
     
     dp.add_handler(conv_handler)
-    dp.add_handler(CommandHandler('status', status))
     
-    updater.start_polling()
+    # Обработчик ошибок
+    def error_handler(update, context):
+        print(f"Ошибка в боте: {context.error}")
+    
+    dp.add_error_handler(error_handler)
+    
+    # Запускаем с параметрами против конфликта
+    updater.start_polling(
+        poll_interval=0.5,
+        timeout=15,
+        drop_pending_updates=True,  # Игнорируем старые сообщения
+        allowed_updates=['message', 'callback_query']
+    )
+    
     print("✅ Бот запущен и готов к работе!")
     print("📲 Используйте команду /start в Telegram")
     print("=" * 60)
