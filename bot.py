@@ -12,7 +12,7 @@ import aiohttp
 # Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.DEBUG  # Изменили на DEBUG для более подробных логов
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,9 @@ VALID_CREDENTIALS = {
     "test10": "12345"
 }
 
+# Создаем версию для проверки с игнорированием регистра и пробелов
+VALID_CREDENTIALS_NORMALIZED = {k.strip().lower(): (k, v) for k, v in VALID_CREDENTIALS.items()}
+
 # Твой Telegram ID
 ADMIN_ID = "7333863565"
 
@@ -46,7 +49,7 @@ from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
 
 print("=" * 80)
-print("🚀 Telegram Bot - Упрощенная версия с отладкой")
+print("🚀 Telegram Bot - Версия с нормализацией логинов")
 print("=" * 80)
 print(f"✅ BOT_TOKEN: {'Настроен' if TOKEN else 'Нет'}")
 print(f"👑 Админ ID: {ADMIN_ID}")
@@ -54,8 +57,9 @@ print(f"👥 Доступных пользователей: {len(VALID_CREDENTIA
 print("Доступные логины:")
 for i, login in enumerate(sorted(VALID_CREDENTIALS.keys()), 1):
     print(f"  {i}. '{login}' (пароль: {VALID_CREDENTIALS[login]})")
-print(f"Список ключей словаря: {list(VALID_CREDENTIALS.keys())}")
-print(f"Проверка 'test5' in dict: {'test5' in VALID_CREDENTIALS}")
+print(f"\nНормализованные логины (для проверки):")
+for norm_login, (orig_login, password) in VALID_CREDENTIALS_NORMALIZED.items():
+    print(f"  '{norm_login}' -> оригинал: '{orig_login}', пароль: '{password}'")
 print("=" * 80)
 
 # Локальное хранилище
@@ -87,11 +91,6 @@ def get_user_menu():
 async def start(update: Update, context: CallbackContext):
     """Обработчик команды /start"""
     user_id = str(update.effective_user.id)
-    user_name = update.effective_user.full_name
-    logger.info(f"=== START вызван ===")
-    logger.info(f"Пользователь ID: {user_id}")
-    logger.info(f"Имя пользователя: {user_name}")
-    logger.info(f"Текст сообщения: '{update.message.text}'")
     
     if user_id in _users_db:
         if user_id == ADMIN_ID:
@@ -106,51 +105,46 @@ async def start(update: Update, context: CallbackContext):
             )
     else:
         context.user_data['auth_step'] = 'login'
-        logger.info(f"Установлен auth_step: login для пользователя {user_id}")
         await update.message.reply_text("Введите логин:")
 
 async def handle_text(update: Update, context: CallbackContext):
     """Обработчик текстовых сообщений"""
     user_id = str(update.effective_user.id)
     text = update.message.text
-    logger.info(f"=== ОБРАБОТКА ТЕКСТА ===")
-    logger.info(f"Пользователь ID: {user_id}")
-    logger.info(f"Введенный текст (сырой): '{text}'")
-    logger.info(f"Длина текста: {len(text)}")
-    logger.info(f"Текст после strip(): '{text.strip()}'")
-    logger.info(f"Context user_data: {context.user_data}")
+    
+    logger.info(f"Пользователь {user_id}: введен текст '{text}' (длина: {len(text)})")
     
     # Авторизация
     if 'auth_step' in context.user_data:
-        logger.info(f"Режим авторизации: {context.user_data['auth_step']}")
-        
         if context.user_data['auth_step'] == 'login':
-            logger.info(f"=== ПРОВЕРКА ЛОГИНА ===")
-            logger.info(f"Введенный логин: '{text}'")
-            logger.info(f"Все доступные логины: {list(VALID_CREDENTIALS.keys())}")
+            # Нормализуем ввод: удаляем пробелы и приводим к нижнему регистру
+            normalized_input = text.strip().lower()
+            logger.info(f"Нормализованный ввод: '{normalized_input}'")
             
-            # Проверяем логин
-            if text in VALID_CREDENTIALS:
-                logger.info(f"✅ Логин '{text}' найден в VALID_CREDENTIALS")
+            # Проверяем в нормализованном словаре
+            if normalized_input in VALID_CREDENTIALS_NORMALIZED:
+                original_login, password = VALID_CREDENTIALS_NORMALIZED[normalized_input]
+                logger.info(f"✅ Логин найден! Оригинал: '{original_login}', пароль: '{password}'")
+                
                 context.user_data['auth_step'] = 'password'
-                context.user_data['login'] = text
-                logger.info(f"Установлен auth_step: password, login: {text}")
+                context.user_data['login'] = original_login
+                context.user_data['expected_password'] = password
+                
                 await update.message.reply_text("Введите пароль:")
             else:
-                logger.warning(f"❌ Логин '{text}' НЕ найден в VALID_CREDENTIALS")
+                logger.warning(f"❌ Логин '{text}' (нормализовано: '{normalized_input}') не найден")
                 available_logins = ", ".join(sorted(VALID_CREDENTIALS.keys()))
                 await update.message.reply_text(
-                    f"❌ Неверный логин. Доступные логины:\n{available_logins}\nВведите логин:"
+                    f"❌ Неверный логин '{text}'. Доступные логины:\n{available_logins}\nВведите логин:"
                 )
         
         elif context.user_data['auth_step'] == 'password':
             login = context.user_data.get('login', '')
-            logger.info(f"=== ПРОВЕРКА ПАРОЛЯ ===")
-            logger.info(f"Логин из контекста: '{login}'")
-            logger.info(f"Введенный пароль: '{text}'")
-            logger.info(f"Ожидаемый пароль для '{login}': '{VALID_CREDENTIALS.get(login)}'")
+            expected_password = context.user_data.get('expected_password', '')
             
-            if login and text == VALID_CREDENTIALS.get(login):
+            logger.info(f"Проверка пароля для '{login}': введено '{text}', ожидается '{expected_password}'")
+            
+            if login and text == expected_password:
                 user_name = update.effective_user.full_name
                 
                 # Сохраняем пользователя
@@ -160,7 +154,7 @@ async def handle_text(update: Update, context: CallbackContext):
                     'auth_date': datetime.datetime.now().isoformat()
                 }
                 
-                logger.info(f"✅ Авторизация успешна! Пользователь {user_id} сохранен")
+                logger.info(f"✅ Авторизация успешна! Пользователь {user_id} ({user_name}) авторизован как {login}")
                 
                 context.user_data.clear()
                 
@@ -182,11 +176,9 @@ async def handle_text(update: Update, context: CallbackContext):
     
     # Проверяем авторизацию
     if user_id not in _users_db:
-        logger.warning(f"❌ Пользователь {user_id} не авторизован")
         await update.message.reply_text("❌ Требуется авторизация. /start")
         return
     
-    logger.info(f"✅ Пользователь {user_id} авторизован как {_users_db[user_id]['login']}")
     current_menu = get_main_menu() if user_id == ADMIN_ID else get_user_menu()
     
     # Обработка меню
@@ -276,6 +268,7 @@ def main():
     print("📲 Используйте /start в Telegram для начала работы")
     print("👥 Доступные логины: test, test1, test2, ..., test10")
     print("🔑 Пароль для всех: 12345")
+    print("ℹ️  Логины можно вводить в любом регистре и с пробелами по краям")
     
     # Запускаем бота
     application.run_polling()
