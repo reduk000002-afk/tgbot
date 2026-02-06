@@ -144,7 +144,7 @@ def handle_auth(update: Update, context: CallbackContext):
         # Проверяем логин
         if text == VALID_LOGIN:
             context.user_data['login'] = text
-            context.user_data['auth_step'] = 'password
+            context.user_data['auth_step'] = 'password'
             update.message.reply_text("Введите пароль:")
         else:
             update.message.reply_text("❌ Неверный логин. Попробуйте снова:\nВведите логин:")
