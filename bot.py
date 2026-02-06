@@ -6,10 +6,8 @@ import csv
 import io
 import base64
 import asyncio
-import threading
 from typing import Dict, List, Optional
 import aiohttp
-from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Настройка логирования
 logging.basicConfig(
@@ -17,34 +15,6 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
-
-# ========== HTTP СЕРВЕР ДЛЯ HEALTHCHECK ==========
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == '/health':
-            self.send_response(200)
-            self.send_header('Content-type', 'text/plain')
-            self.end_headers()
-            self.wfile.write(b'Bot is running')
-        elif self.path == '/':
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            self.wfile.write(b'<h1>Telegram Bot with GitHub Storage</h1><p>Bot is operational</p>')
-        else:
-            self.send_response(404)
-            self.end_headers()
-    
-    def log_message(self, format, *args):
-        # Минимальное логирование
-        logger.debug(f"{self.address_string()} - {format % args}")
-
-def start_health_server():
-    """Запустить HTTP сервер для healthcheck"""
-    port = int(os.getenv('PORT', 8080))
-    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
-    logger.info(f"✅ Health check сервер запущен на порту {port}")
-    server.serve_forever()
 
 # ========== КОНФИГУРАЦИЯ ==========
 TOKEN = os.getenv("BOT_TOKEN", "8199840666:AAEMBSi3Y-SIN8cQqnBVso2B7fCKh7fb-Uk")
@@ -496,6 +466,32 @@ async def download_csv(update: Update, context: CallbackContext):
         caption=f"📊 База ников с GitHub\n✅ Записей: {len(all_nicks)}\n📁 Файл: {NICKS_FILE_PATH}"
     )
 
+# ========== ПРОСТОЙ HTTP ЭНДПОИНТ ДЛЯ HEALTHCHECK ==========
+from http.server import BaseHTTPRequestHandler
+import http.server
+import socketserver
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/health':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b'OK')
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def log_message(self, format, *args):
+        pass  # Отключаем логи
+
+def run_health_server():
+    """Запуск простого HTTP сервера для healthcheck"""
+    port = int(os.getenv('PORT', 8080))
+    with socketserver.TCPServer(("", port), HealthHandler) as httpd:
+        print(f"✅ Health check сервер запущен на порту {port}")
+        httpd.serve_forever()
+
 # ========== ОСНОВНАЯ ФУНКЦИЯ ==========
 async def main():
     """Основная функция запуска бота"""
@@ -517,11 +513,17 @@ async def main():
     if not GITHUB_TOKEN:
         print("⚠️  ПРЕДУПРЕЖДЕНИЕ: GITHUB_TOKEN не настроен!")
         print("   Данные не будут сохраняться на GitHub")
+    else:
+        print("✅ GitHub токен настроен")
     
-    # Запускаем healthcheck сервер в отдельном потоке
-    health_thread = threading.Thread(target=start_health_server, daemon=True)
+    # Запускаем HTTP сервер в отдельном потоке
+    import threading
+    health_thread = threading.Thread(target=run_health_server, daemon=True)
     health_thread.start()
-    print("✅ Health check сервер запущен")
+    
+    # Даем время серверу запуститься
+    import time
+    time.sleep(2)
     
     # Создаем и настраиваем приложение бота
     application = Application.builder().token(TOKEN).build()
