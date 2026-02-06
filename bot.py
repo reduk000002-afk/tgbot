@@ -53,7 +53,7 @@ def get_main_menu():
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-# Простые обработчики
+# ========== ОБРАБОТЧИКИ ==========
 def start(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
     
@@ -198,8 +198,7 @@ def main():
         poll_interval=1.0,
         timeout=20,
         drop_pending_updates=True,
-        bootstrap_retries=0,
-        clean=True
+        bootstrap_retries=0
     )
     
     print("✅ Бот запущен!")
