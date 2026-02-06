@@ -17,7 +17,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ========== КОНФИГУРАЦИЯ ==========
-GITHUB_TOKEN = "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"
+GITHUB_TOKEN = "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"
 TOKEN = "8199840666:AAEMBSi3Y-SIN8cQqnBVso2B7fCKh7fb-Uk"
 GITHUB_REPO_OWNER = "reduk000002-afk"
 GITHUB_REPO_NAME = "tgbot"
