@@ -6,8 +6,10 @@ import csv
 import io
 import base64
 import asyncio
+import threading
 from typing import Dict, List, Optional
 import aiohttp
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Настройка логирования
 logging.basicConfig(
@@ -16,7 +18,35 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Конфигурация из переменных окружения
+# ========== HTTP СЕРВЕР ДЛЯ HEALTHCHECK ==========
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/health':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b'Bot is running')
+        elif self.path == '/':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            self.wfile.write(b'<h1>Telegram Bot with GitHub Storage</h1><p>Bot is operational</p>')
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def log_message(self, format, *args):
+        # Минимальное логирование
+        logger.debug(f"{self.address_string()} - {format % args}")
+
+def start_health_server():
+    """Запустить HTTP сервер для healthcheck"""
+    port = int(os.getenv('PORT', 8080))
+    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+    logger.info(f"✅ Health check сервер запущен на порту {port}")
+    server.serve_forever()
+
+# ========== КОНФИГУРАЦИЯ ==========
 TOKEN = os.getenv("BOT_TOKEN", "8199840666:AAEMBSi3Y-SIN8cQqnBVso2B7fCKh7fb-Uk")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO_OWNER = os.getenv("GITHUB_REPO_OWNER", "reduk000002-afk")
@@ -32,14 +62,12 @@ ADMIN_ID = "7333863565"
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
 
-print("=" * 60)
-print("🔍 Проверяю конфигурацию GitHub...")
-
 # ========== НАСТРОЙКИ GITHUB ==========
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/contents"
 NICKS_FILE_PATH = "nicks_database.json"
 USERS_FILE_PATH = "users_database.json"
 
+# ========== GITHUB ФУНКЦИИ ==========
 async def get_github_file_content(filename: str) -> Optional[Dict]:
     """Получить содержимое файла с GitHub"""
     if not GITHUB_TOKEN:
@@ -60,7 +88,6 @@ async def get_github_file_content(filename: str) -> Optional[Dict]:
                     data = await response.json()
                     content = data.get('content', '')
                     if content:
-                        # Декодируем base64
                         json_content = base64.b64decode(content).decode('utf-8')
                         return json.loads(json_content)
                     return {}
@@ -68,10 +95,11 @@ async def get_github_file_content(filename: str) -> Optional[Dict]:
                     logger.info(f"📄 Файл {filename} не найден, создадим при сохранении")
                     return {}
                 else:
-                    logger.error(f"❌ Ошибка GitHub API: {response.status}")
+                    error_text = await response.text()
+                    logger.error(f"❌ Ошибка GitHub API {response.status}: {error_text}")
                     return {}
         except Exception as e:
-            logger.error(f"❌ Ошибка получения файла: {e}")
+            logger.error(f"❌ Ошибка получения файла {filename}: {e}")
             return {}
 
 async def save_to_github_file(filename: str, data: Dict) -> bool:
@@ -88,22 +116,21 @@ async def save_to_github_file(filename: str, data: Dict) -> bool:
     
     url = f"{GITHUB_API_URL}/{filename}"
     
-    # Сначала получаем текущий файл, чтобы получить sha (если существует)
     async with aiohttp.ClientSession() as session:
         try:
             # Получаем информацию о файле
+            sha = None
             async with session.get(url, headers=headers) as response:
-                sha = None
                 if response.status == 200:
                     file_info = await response.json()
                     sha = file_info.get('sha')
             
-            # Подготавливаем данные для отправки
+            # Подготавливаем данные
             content = json.dumps(data, ensure_ascii=False, indent=2)
             content_base64 = base64.b64encode(content.encode('utf-8')).decode('utf-8')
             
             payload = {
-                "message": f"Update {filename} via bot",
+                "message": f"Update {filename} via bot at {datetime.datetime.now().isoformat()}",
                 "content": content_base64,
                 "branch": "main"
             }
@@ -116,17 +143,17 @@ async def save_to_github_file(filename: str, data: Dict) -> bool:
                 if response.status in [200, 201]:
                     logger.info(f"✅ Файл {filename} сохранен на GitHub")
                     
-                    # Выводим ссылку на файл
+                    # Показываем ссылку
                     file_url = f"https://github.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/blob/main/{filename}"
-                    print(f"📁 Файл доступен по ссылке: {file_url}")
+                    print(f"📁 Файл: {file_url}")
                     return True
                 else:
                     error_text = await response.text()
-                    logger.error(f"❌ Ошибка сохранения: {response.status} - {error_text}")
+                    logger.error(f"❌ Ошибка сохранения {filename}: {response.status} - {error_text}")
                     return False
                     
         except Exception as e:
-            logger.error(f"❌ Ошибка сохранения файла: {e}")
+            logger.error(f"❌ Ошибка сохранения файла {filename}: {e}")
             return False
 
 # ========== ФУНКЦИИ ДЛЯ РАБОТЫ С ДАННЫМИ ==========
@@ -149,14 +176,17 @@ async def save_nick(nick: str, manager_id: str, manager_name: str) -> bool:
     nicks = await load_nicks()
     
     # Если файла нет, создаем структуру
-    if "nicks" not in nicks:
+    if not nicks or "nicks" not in nicks:
         nicks = {"nicks": {}, "total": 0, "updated": datetime.datetime.now().isoformat()}
     
     # Проверяем, есть ли уже такой ник
-    if nick in nicks["nicks"]:
+    if nick in nicks.get("nicks", {}):
         return False
     
     # Добавляем ник
+    if "nicks" not in nicks:
+        nicks["nicks"] = {}
+    
     nicks["nicks"][nick] = {
         'user_id': manager_id,
         'user_name': manager_name,
@@ -171,29 +201,29 @@ async def save_nick(nick: str, manager_id: str, manager_name: str) -> bool:
 async def get_nick(nick: str) -> Optional[Dict]:
     """Получить информацию о нике"""
     nicks = await load_nicks()
-    if "nicks" in nicks and nick in nicks["nicks"]:
+    if nicks and "nicks" in nicks and nick in nicks["nicks"]:
         return nicks["nicks"][nick]
     return None
 
 async def get_all_nicks() -> List[Dict]:
     """Получить все ники"""
     nicks = await load_nicks()
-    if "nicks" not in nicks:
+    if not nicks or "nicks" not in nicks:
         return []
     
     all_nicks = []
     for nick, info in nicks["nicks"].items():
         date = info.get('check_date', '')
         if date and len(date) > 10:
-            date = date[:10]  # Берем только дату
-            
+            date = date[:10]
+        
         all_nicks.append({
             'nick': nick,
-            'manager': info.get('user_name', ''),
-            'date': date
+            'manager': info.get('user_name', 'Неизвестно'),
+            'date': date or 'Нет даты'
         })
     
-    # Сортируем по дате (новые первые)
+    # Сортируем по дате
     all_nicks.sort(key=lambda x: x['date'], reverse=True)
     return all_nicks
 
@@ -202,14 +232,18 @@ async def save_user(telegram_id: str, login: str, name: str) -> bool:
     users = await load_users()
     
     # Если файла нет, создаем структуру
-    if "users" not in users:
+    if not users or "users" not in users:
         users = {"users": {}, "total": 0, "updated": datetime.datetime.now().isoformat()}
     
     # Добавляем/обновляем пользователя
+    if "users" not in users:
+        users["users"] = {}
+    
     users["users"][telegram_id] = {
         'login': login,
         'name': name,
-        'auth_date': datetime.datetime.now().isoformat()
+        'auth_date': datetime.datetime.now().isoformat(),
+        'telegram_id': telegram_id
     }
     users["total"] = len(users["users"])
     users["updated"] = datetime.datetime.now().isoformat()
@@ -220,7 +254,7 @@ async def save_user(telegram_id: str, login: str, name: str) -> bool:
 async def get_user(telegram_id: str) -> Optional[Dict]:
     """Получить пользователя"""
     users = await load_users()
-    if "users" in users and telegram_id in users["users"]:
+    if users and "users" in users and telegram_id in users["users"]:
         return users["users"][telegram_id]
     return None
 
@@ -248,7 +282,7 @@ def get_user_menu():
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-# ========== ОСНОВНЫЕ ФУНКЦИИ БОТА ==========
+# ========== ОБРАБОТЧИКИ КОМАНД ==========
 async def start(update: Update, context: CallbackContext):
     """Обработчик команды /start"""
     user_id = str(update.effective_user.id)
@@ -258,7 +292,7 @@ async def start(update: Update, context: CallbackContext):
         if user_id == ADMIN_ID:
             await update.message.reply_text(
                 f"✅ Добро пожаловать, Администратор!\n"
-                f"📊 Файлы хранятся на GitHub",
+                f"📊 Данные сохраняются на GitHub",
                 reply_markup=get_main_menu()
             )
         else:
@@ -319,7 +353,7 @@ async def handle_text(update: Update, context: CallbackContext):
     
     current_menu = get_main_menu() if user_id == ADMIN_ID else get_user_menu()
     
-    # Меню
+    # Обработка меню
     if text == "🔍 Проверка ников":
         await update.message.reply_text("Введите ник для проверки:")
         context.user_data['mode'] = 'check_nick'
@@ -332,7 +366,7 @@ async def handle_text(update: Update, context: CallbackContext):
         else:
             # Получаем статистику
             nicks_data = await load_nicks()
-            total = nicks_data.get('total', 0) if isinstance(nicks_data, dict) else 0
+            total = nicks_data.get('total', 0) if isinstance(nicks_data, dict) else len(all_nicks)
             
             response = f"📋 Последние 10 ников (всего: {total}):\n\n"
             for i, nick_info in enumerate(all_nicks[:10], 1):
@@ -372,11 +406,11 @@ async def handle_text(update: Update, context: CallbackContext):
     
     elif text == "❌ Выход":
         await update.message.reply_text(
-            "👋 Вы вышли. /start", 
+            "👋 Вы вышли. Используйте /start для входа", 
             reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/start")]], resize_keyboard=True)
         )
     
-    # Режимы
+    # Режимы работы
     elif context.user_data.get('mode') == 'check_nick':
         nick = text.strip().lower()
         if nick:
@@ -403,16 +437,28 @@ async def handle_text(update: Update, context: CallbackContext):
                         f"💾 Сохранено на GitHub"
                     )
                 else:
-                    await update.message.reply_text("❌ Ошибка сохранения.")
+                    await update.message.reply_text("❌ Ошибка сохранения. Попробуйте еще раз.")
         
-        await update.message.reply_text("Введите следующий ник:")
+        await update.message.reply_text("Введите следующий ник (или выберите действие из меню):")
     
     elif context.user_data.get('mode') == 'report':
         report = text.strip()
         if report:
-            # Просто подтверждаем
+            # Сохраняем отчет локально (для примера)
+            report_data = {
+                "user_id": user_id,
+                "user_name": user_data['name'],
+                "report": report,
+                "date": datetime.datetime.now().isoformat()
+            }
+            
+            # Можно сохранить отчет в отдельный файл на GitHub
+            # Для простоты просто подтверждаем
             await update.message.reply_text("✅ Отчет отправлен!", reply_markup=current_menu)
             context.user_data.pop('mode', None)
+            
+            # Логируем отчет
+            logger.info(f"📝 Отчет от {user_data['name']}: {report[:50]}...")
         else:
             await update.message.reply_text("❌ Отчет не может быть пустым!")
 
@@ -427,60 +473,70 @@ async def download_csv(update: Update, context: CallbackContext):
     # Создаем CSV
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['Ник', 'Менеджер', 'Дата проверки', 'Источник'])
+    writer.writerow(['Ник', 'Менеджер', 'Дата проверки', 'Источник', 'ID менеджера'])
     
     for nick_info in all_nicks:
+        # Получаем полную информацию о нике
+        nick_data = await get_nick(nick_info['nick'])
+        manager_id = nick_data.get('user_id', '') if nick_data else ''
+        
         writer.writerow([
             nick_info['nick'],
             nick_info['manager'],
             nick_info['date'],
-            'GitHub'
+            'GitHub',
+            manager_id
         ])
     
     bio = io.BytesIO(output.getvalue().encode('utf-8'))
-    bio.name = f'nicks_{datetime.datetime.now().strftime("%d-%m-%Y")}.csv'
+    bio.name = f'nicks_{datetime.datetime.now().strftime("%d-%m-%Y_%H-%M")}.csv'
     
     await update.message.reply_document(
         document=bio,
-        caption=f"📊 База ников с GitHub\n✅ Записей: {len(all_nicks)}\n📁 Сохранено в: {NICKS_FILE_PATH}"
+        caption=f"📊 База ников с GitHub\n✅ Записей: {len(all_nicks)}\n📁 Файл: {NICKS_FILE_PATH}"
     )
 
+# ========== ОСНОВНАЯ ФУНКЦИЯ ==========
 async def main():
-    """Основная функция"""
+    """Основная функция запуска бота"""
+    print("=" * 60)
+    print("🚀 Telegram Bot with GitHub Storage")
     print("=" * 60)
     print(f"👑 Админ ID: {ADMIN_ID}")
     print(f"👤 Владелец репозитория: {GITHUB_REPO_OWNER}")
     print(f"📁 Репозиторий: {GITHUB_REPO_NAME}")
     print(f"📄 Файл с никами: {NICKS_FILE_PATH}")
+    print(f"👥 Файл с пользователями: {USERS_FILE_PATH}")
     print("=" * 60)
     
-    # Проверяем подключение к GitHub
-    if GITHUB_TOKEN:
-        print("✅ GitHub токен настроен")
-        
-        # Проверяем доступ к репозиторию
-        test_nicks = await load_nicks()
-        if isinstance(test_nicks, dict):
-            total = test_nicks.get('total', 0) if "nicks" in test_nicks else 0
-            print(f"📊 Найдено ников в базе: {total}")
-        else:
-            print("📁 Создаем новую базу на GitHub")
-    else:
-        print("❌ GITHUB_TOKEN не настроен!")
+    # Проверяем конфигурацию
+    if not TOKEN:
+        print("❌ ОШИБКА: BOT_TOKEN не настроен!")
+        return
     
-    # Создаем приложение
+    if not GITHUB_TOKEN:
+        print("⚠️  ПРЕДУПРЕЖДЕНИЕ: GITHUB_TOKEN не настроен!")
+        print("   Данные не будут сохраняться на GitHub")
+    
+    # Запускаем healthcheck сервер в отдельном потоке
+    health_thread = threading.Thread(target=start_health_server, daemon=True)
+    health_thread.start()
+    print("✅ Health check сервер запущен")
+    
+    # Создаем и настраиваем приложение бота
     application = Application.builder().token(TOKEN).build()
     
     # Добавляем обработчики
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT, handle_text))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     
-    # Запускаем бота
-    print("✅ Бот запущен!")
-    print("📲 /start для начала работы")
+    print("🤖 Telegram бот запущен и готов к работе")
+    print("📲 Используйте /start в Telegram для начала работы")
     print("=" * 60)
     
+    # Запускаем бота
     await application.run_polling()
 
 if __name__ == '__main__':
+    # Запускаем асинхронный код
     asyncio.run(main())
