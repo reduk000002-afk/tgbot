@@ -49,6 +49,9 @@ VALID_CREDENTIALS = {
     "test10": "12345"
 }
 
+# Создаем версию словаря с логинами в нижнем регистре для удобной проверки
+VALID_CREDENTIALS_LOWER = {k.lower(): v for k, v in VALID_CREDENTIALS.items()}
+
 # Твой Telegram ID
 ADMIN_ID = "7333863565"
 
@@ -364,17 +367,23 @@ async def start(update: Update, context: CallbackContext):
 async def handle_text(update: Update, context: CallbackContext):
     """Обработчик текстовых сообщений"""
     user_id = str(update.effective_user.id)
-    text = update.message.text
+    text = update.message.text.strip()  # Добавил strip() для удаления пробелов
     
     # Авторизация
     if 'auth_step' in context.user_data:
         if context.user_data['auth_step'] == 'login':
-            if text in VALID_CREDENTIALS:
+            # Преобразуем ввод в нижний регистр для сравнения
+            login_lower = text.lower()
+            if login_lower in VALID_CREDENTIALS_LOWER:
+                # Сохраняем оригинальный логин (как в словаре VALID_CREDENTIALS)
+                original_login = next(k for k in VALID_CREDENTIALS.keys() if k.lower() == login_lower)
                 context.user_data['auth_step'] = 'password'
-                context.user_data['login'] = text
+                context.user_data['login'] = original_login  # Сохраняем оригинальный логин
                 await update.message.reply_text("Введите пароль:")
             else:
-                await update.message.reply_text("❌ Неверный логин. Введите логин:")
+                # Показываем доступные логины
+                available_logins = ", ".join(VALID_CREDENTIALS.keys())
+                await update.message.reply_text(f"❌ Неверный логин. Доступные логины: {available_logins}\nВведите логин:")
         
         elif context.user_data['auth_step'] == 'password':
             login = context.user_data.get('login', '')
@@ -397,7 +406,7 @@ async def handle_text(update: Update, context: CallbackContext):
                         reply_markup=get_user_menu()
                     )
             else:
-                await update.message.reply_text("❌ Неверный пароль. /start")
+                await update.message.reply_text("❌ Неверный пароль. Используйте /start для повторной попытки")
                 context.user_data.clear()
         return
     
@@ -545,6 +554,7 @@ def main():
     print("📲 Используйте /start в Telegram для начала работы")
     print("👥 Доступные логины: test, test1, test2, ..., test10")
     print("🔑 Пароль для всех: 12345")
+    print("ℹ️  Логины можно вводить в любом регистре (Test, TEST5, TeSt1 и т.д.)")
     
     # Запускаем бота
     application.run_polling()
