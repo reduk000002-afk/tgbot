@@ -33,9 +33,112 @@ if os.getenv("GITHUB_REPO_OWNER"):
 if os.getenv("GITHUB_REPO_NAME"):
     GITHUB_REPO_NAME = os.getenv("GITHUB_REPO_NAME")
 
-# Логин и пароль
-VALID_LOGIN = "test"
-VALID_PASSWORD = "12345"
+# ========== 100 ЛОГИНОВ И ПАРОЛЕЙ ==========
+# Логин: 4 заглавные буквы + 3 цифры (без последовательностей)
+# Пароль: 1 заглавная, 1 маленькая, 1 заглавная, 5 цифр (без последовательностей)
+VALID_CREDENTIALS = {
+    # Логин: пароль
+    "XKPM738": "BaR42917",
+    "QZTF194": "DiM58306",
+    "LHRC562": "FoN79124",
+    "VNJS850": "GeT36589",
+    "BWYG347": "HuL24703",
+    "MDKA619": "JaP60852",
+    "STXQ072": "KiR19437",
+    "YPLO483": "LuN52860",
+    "CRNZ961": "MeQ71349",
+    "GIBU258": "NoS39527",
+    "FEWV730": "PaT14683",
+    "JKXD425": "QuR70952",
+    "OHMQ167": "RiS23894",
+    "ZYRG509": "SaV68103",
+    "BPIT382": "TeW45729",
+    "UNLC741": "UaX92316",
+    "VMHS095": "VaY67428",
+    "AQDF263": "WeZ31907",
+    "XTKN874": "XiA58492",
+    "RJLQ519": "YoB76301",
+    "SCGP682": "ZaC29845",
+    "DHOB403": "AbD61793",
+    "FMYE170": "BeE34208",
+    "KWHT934": "CiF79561",
+    "NRVU758": "DoG12047",
+    "QGXI286": "EuH56392",
+    "PZOD641": "FaI87403",
+    "ULBA927": "GoJ21659",
+    "EJYQ350": "HaK73804",
+    "IMCN809": "IiL49527",
+    "OTRF572": "JoM61083",
+    "VWXH136": "KuN32497",
+    "YADK749": "LaO57816",
+    "BQEU980": "MiP24903",
+    "CPMZ317": "NoQ86124",
+    "DGRT654": "OuR30759",
+    "ESLA082": "PaS49216",
+    "FTUN435": "QiT73508",
+    "GHBV791": "RuU16492",
+    "IJXY208": "SaV38057",
+    "KMZO963": "TiW51924",
+    "LNPQ124": "UoX67203",
+    "MOUR579": "VaY18456",
+    "PQAV306": "WeZ93702",
+    "RSBX742": "XaA65819",
+    "TUCD185": "YoB20347",
+    "VWEF630": "ZaC41968",
+    "XYGH973": "AdD75203",
+    "ZAIJ418": "BeE18654",
+    "BCKQ761": "CiF30927",
+    "DEMV204": "DoG57419",
+    "FGNO857": "EuH82603",
+    "HIPR392": "FaI14567",
+    "JKST029": "GoJ39802",
+    "LMUV564": "HaK75134",
+    "NOPW931": "IiL26948",
+    "QRXY278": "JoM41307",
+    "STZA645": "KuN98752",
+    "UVBC012": "LaO23416",
+    "WXDE379": "MiP56928",
+    "YZFG846": "NoQ10273",
+    "ABHI213": "OuR45809",
+    "CDJK580": "PaS62174",
+    "EFLM947": "QiT39416",
+    "GHNP314": "RuU85720",
+    "IJQR681": "SaV13945",
+    "KLST058": "TiW76208",
+    "MNUV325": "UoX29137",
+    "OPWX792": "VaY54816",
+    "QRYZ169": "WeZ90327",
+    "STAB436": "XaA16485",
+    "UVCD803": "YoB73902",
+    "WXEF270": "ZaC28546",
+    "YZGH537": "AdD41093",
+    "ABIJ904": "BeE67218",
+    "CDKL371": "CiF83904",
+    "EFMN648": "DoG12567",
+    "GHOP015": "EuH39482",
+    "IJQR382": "FaI56701",
+    "KLST759": "GoJ23894",
+    "MNUV126": "HaK45017",
+    "OPWX493": "IiL89236",
+    "QRYZ860": "JoM31745",
+    "STAB237": "KuN56489",
+    "UVCD504": "LaO78123",
+    "WXEF875": "MiP23690",
+    "YZGH146": "NoQ45781",
+    "ABIJ427": "OuR69023",
+    "CDKL718": "PaS31456",
+    "EFMN089": "QiT87201",
+    "GHOP350": "RuV45912",
+    "IJQR761": "SaW68304",
+    "KLST032": "TiX12789",
+    "MNUV413": "UoY34567",
+    "OPWX794": "VaZ89123",
+    "QRYZ125": "WeA45678",
+    "STAB436": "XoB23456",
+    "UVCD767": "YaC78901",
+    "WXEF098": "ZoD12345",
+    "test": "12345"  # админский логин для теста
+}
 
 # Твой Telegram ID
 ADMIN_ID = "7333863565"
@@ -55,12 +158,14 @@ print(f"✅ BOT_TOKEN: {'Настроен' if TOKEN else 'Нет'}")
 print(f"✅ GITHUB_TOKEN: {'Настроен' if GITHUB_TOKEN else 'Нет'}")
 print(f"👑 Админ ID: {ADMIN_ID}")
 print(f"👤 Репозиторий: {GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}")
+print(f"📊 Доступно логинов: {len(VALID_CREDENTIALS)}")
 print("=" * 60)
 
 # ========== УПРОЩЕННЫЕ ФУНКЦИИ ==========
 # Локальное хранилище для быстрой работы
-_local_users = {}
-_local_nicks = {}
+_local_users = {}  # telegram_id -> user_data
+_local_nicks = {}  # nick -> nick_data
+_login_to_user = {}  # login -> telegram_id (для связи аккаунтов)
 
 async def save_user(telegram_id: str, login: str, name: str) -> bool:
     """Сохранить пользователя в GitHub"""
@@ -69,12 +174,14 @@ async def save_user(telegram_id: str, login: str, name: str) -> bool:
         _local_users[telegram_id] = {
             'login': login,
             'name': name,
-            'auth_date': datetime.datetime.now().isoformat()
+            'auth_date': datetime.datetime.now().isoformat(),
+            'telegram_id': telegram_id
         }
+        _login_to_user[login] = telegram_id
         return True
     
     # Загружаем текущих пользователей
-    users_data = {"users": {}, "total": 0, "updated": datetime.datetime.now().isoformat()}
+    users_data = {"users": {}, "logins": {}, "total": 0, "updated": datetime.datetime.now().isoformat()}
     
     try:
         headers = {'Authorization': f'token {GITHUB_TOKEN}'}
@@ -93,8 +200,26 @@ async def save_user(telegram_id: str, login: str, name: str) -> bool:
     users_data["users"][telegram_id] = {
         'login': login,
         'name': name,
-        'auth_date': datetime.datetime.now().isoformat()
+        'auth_date': datetime.datetime.now().isoformat(),
+        'telegram_id': telegram_id,
+        'last_login': datetime.datetime.now().isoformat()
     }
+    
+    # Связываем логин с пользователем (для доступа с разных телеграм аккаунтов)
+    if login not in users_data["logins"]:
+        users_data["logins"][login] = {
+            'telegram_ids': [],
+            'main_name': name,
+            'last_used': datetime.datetime.now().isoformat()
+        }
+    
+    # Добавляем telegram_id в список, если его там еще нет
+    if telegram_id not in users_data["logins"][login]['telegram_ids']:
+        users_data["logins"][login]['telegram_ids'].append(telegram_id)
+    
+    users_data["logins"][login]['last_used'] = datetime.datetime.now().isoformat()
+    users_data["logins"][login]['main_name'] = name  # Обновляем имя на последнее
+    
     users_data["total"] = len(users_data["users"])
     users_data["updated"] = datetime.datetime.now().isoformat()
     
@@ -112,7 +237,7 @@ async def save_user(telegram_id: str, login: str, name: str) -> bool:
                     sha = file_info.get('sha')
         
         payload = {
-            "message": f"Add user {name}",
+            "message": f"Add/update user {name} (login: {login})",
             "content": content_base64,
             "branch": "main"
         }
@@ -123,16 +248,20 @@ async def save_user(telegram_id: str, login: str, name: str) -> bool:
             async with session.put(url, headers=headers, json=payload) as response:
                 if response.status in [200, 201]:
                     logger.info(f"✅ Пользователь {name} сохранен на GitHub")
+                    # Обновляем локальный кэш
+                    _local_users[telegram_id] = users_data["users"][telegram_id]
+                    _login_to_user[login] = telegram_id
                     return True
     except Exception as e:
         logger.error(f"❌ Ошибка сохранения на GitHub: {e}")
     
     # Если не удалось сохранить на GitHub, сохраняем локально
     _local_users[telegram_id] = users_data["users"][telegram_id]
+    _login_to_user[login] = telegram_id
     return True
 
 async def get_user(telegram_id: str) -> Optional[Dict]:
-    """Получить пользователя"""
+    """Получить пользователя по telegram_id"""
     # Сначала проверяем локальное хранилище
     if telegram_id in _local_users:
         return _local_users[telegram_id]
@@ -155,19 +284,90 @@ async def get_user(telegram_id: str) -> Optional[Dict]:
                         user = users_data["users"][telegram_id]
                         # Кэшируем в локальное хранилище
                         _local_users[telegram_id] = user
+                        if user.get('login'):
+                            _login_to_user[user['login']] = telegram_id
                         return user
     except:
         pass
     
     return None
 
-async def save_nick(nick: str, manager_id: str, manager_name: str) -> bool:
+async def get_user_by_login(login: str) -> Optional[Dict]:
+    """Получить пользователя по логину (для истории с разных аккаунтов)"""
+    if not GITHUB_TOKEN:
+        return None
+    
+    try:
+        headers = {'Authorization': f'token {GITHUB_TOKEN}'}
+        url = f"{GITHUB_API_URL}/{USERS_FILE_PATH}"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    content = base64.b64decode(data['content']).decode('utf-8')
+                    users_data = json.loads(content)
+                    
+                    # Ищем пользователя по логину
+                    for user_id, user_data in users_data.get("users", {}).items():
+                        if user_data.get('login') == login:
+                            return user_data
+                    
+                    # Проверяем связку логинов
+                    if login in users_data.get("logins", {}):
+                        login_info = users_data["logins"][login]
+                        if login_info.get('telegram_ids'):
+                            # Берем последнего пользователя из списка
+                            last_id = login_info['telegram_ids'][-1]
+                            if last_id in users_data.get("users", {}):
+                                return users_data["users"][last_id]
+    except:
+        pass
+    
+    return None
+
+async def get_user_nicks(login: str) -> List[Dict]:
+    """Получить все ники пользователя по логину"""
+    if not GITHUB_TOKEN:
+        return []
+    
+    try:
+        headers = {'Authorization': f'token {GITHUB_TOKEN}'}
+        url = f"{GITHUB_API_URL}/{NICKS_FILE_PATH}"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    content = base64.b64decode(data['content']).decode('utf-8')
+                    nicks_data = json.loads(content)
+                    
+                    user_nicks = []
+                    for nick, info in nicks_data.get("nicks", {}).items():
+                        if info.get('user_login') == login:
+                            date = info.get('check_date', '')[:10]
+                            user_nicks.append({
+                                'nick': nick,
+                                'date': date or 'Нет даты',
+                                'manager': info.get('user_name', 'Неизвестно')
+                            })
+                    
+                    # Сортируем по дате
+                    user_nicks.sort(key=lambda x: x['date'], reverse=True)
+                    return user_nicks
+    except:
+        pass
+    
+    return []
+
+async def save_nick(nick: str, manager_id: str, manager_name: str, login: str) -> bool:
     """Сохранить ник в GitHub"""
     if not GITHUB_TOKEN:
         logger.error("❌ GITHUB_TOKEN не настроен! Сохраняю локально")
         _local_nicks[nick] = {
             'user_id': manager_id,
             'user_name': manager_name,
+            'user_login': login,
             'check_date': datetime.datetime.now().isoformat()
         }
         return True
@@ -195,6 +395,7 @@ async def save_nick(nick: str, manager_id: str, manager_name: str) -> bool:
     nicks_data["nicks"][nick] = {
         'user_id': manager_id,
         'user_name': manager_name,
+        'user_login': login,
         'check_date': datetime.datetime.now().isoformat()
     }
     nicks_data["total"] = len(nicks_data["nicks"])
@@ -214,7 +415,7 @@ async def save_nick(nick: str, manager_id: str, manager_name: str) -> bool:
                     sha = file_info.get('sha')
         
         payload = {
-            "message": f"Add nick {nick}",
+            "message": f"Add nick {nick} by {login}",
             "content": content_base64,
             "branch": "main"
         }
@@ -224,7 +425,9 @@ async def save_nick(nick: str, manager_id: str, manager_name: str) -> bool:
         async with aiohttp.ClientSession() as session:
             async with session.put(url, headers=headers, json=payload) as response:
                 if response.status in [200, 201]:
-                    logger.info(f"✅ Ник {nick} сохранен на GitHub")
+                    logger.info(f"✅ Ник {nick} сохранен на GitHub пользователем {login}")
+                    # Обновляем локальный кэш
+                    _local_nicks[nick] = nicks_data["nicks"][nick]
                     return True
     except Exception as e:
         logger.error(f"❌ Ошибка сохранения ника на GitHub: {e}")
@@ -273,6 +476,7 @@ async def get_all_nicks() -> List[Dict]:
         all_nicks.append({
             'nick': nick,
             'manager': info.get('user_name', 'Неизвестно'),
+            'login': info.get('user_login', 'Неизвестно'),
             'date': date or 'Нет даты'
         })
     
@@ -294,6 +498,7 @@ async def get_all_nicks() -> List[Dict]:
                                 all_nicks.append({
                                     'nick': nick,
                                     'manager': info.get('user_name', 'Неизвестно'),
+                                    'login': info.get('user_login', 'Неизвестно'),
                                     'date': date or 'Нет даты'
                                 })
         except:
@@ -309,6 +514,7 @@ def get_main_menu():
     keyboard = [
         [KeyboardButton("🔍 Проверка ников")],
         [KeyboardButton("📊 История ников")],
+        [KeyboardButton("📋 Мои ники")],
         [KeyboardButton("📝 Отправить отчет")],
         [KeyboardButton("💾 Резервная копия")],
         [KeyboardButton("📥 Скачать базу")],
@@ -322,6 +528,7 @@ def get_user_menu():
     keyboard = [
         [KeyboardButton("🔍 Проверка ников")],
         [KeyboardButton("📊 История ников")],
+        [KeyboardButton("📋 Мои ники")],
         [KeyboardButton("📝 Отправить отчет")],
         [KeyboardButton("❌ Выход")]
     ]
@@ -336,12 +543,14 @@ async def start(update: Update, context: CallbackContext):
     if user_data:
         if user_id == ADMIN_ID:
             await update.message.reply_text(
-                f"✅ Добро пожаловать, Администратор!",
+                f"✅ Добро пожаловать, Администратор!\n"
+                f"👤 Ваш логин: {user_data.get('login', 'Неизвестно')}",
                 reply_markup=get_main_menu()
             )
         else:
             await update.message.reply_text(
-                f"✅ Добро пожаловать, {user_data['name']}!",
+                f"✅ Добро пожаловать, {user_data['name']}!\n"
+                f"👤 Ваш логин: {user_data.get('login', 'Неизвестно')}",
                 reply_markup=get_user_menu()
             )
     else:
@@ -351,36 +560,50 @@ async def start(update: Update, context: CallbackContext):
 async def handle_text(update: Update, context: CallbackContext):
     """Обработчик текстовых сообщений"""
     user_id = str(update.effective_user.id)
-    text = update.message.text
+    text = update.message.text.strip()
     
     # Авторизация
     if 'auth_step' in context.user_data:
         if context.user_data['auth_step'] == 'login':
-            if text == VALID_LOGIN:
+            if text in VALID_CREDENTIALS:
                 context.user_data['auth_step'] = 'password'
                 context.user_data['login'] = text
-                await update.message.reply_text("Введите пароль:")
+                await update.message.reply_text(f"Логин принят: {text}\nВведите пароль:")
             else:
                 await update.message.reply_text("❌ Неверный логин. Введите логин:")
         
         elif context.user_data['auth_step'] == 'password':
-            if text == VALID_PASSWORD:
+            login = context.user_data['login']
+            expected_password = VALID_CREDENTIALS.get(login)
+            
+            if text == expected_password:
                 user_name = update.effective_user.full_name
-                login = context.user_data['login']
+                
+                # Проверяем, есть ли уже пользователь с таким логином
+                existing_user = await get_user_by_login(login)
+                history_msg = ""
+                if existing_user and existing_user.get('telegram_id') != user_id:
+                    user_nicks = await get_user_nicks(login)
+                    if user_nicks:
+                        history_msg = f"\n📋 Ваших ников в базе: {len(user_nicks)}"
+                    else:
+                        history_msg = f"\n📭 У этого логина еще нет проверенных ников"
                 
                 # Сохраняем пользователя
                 await save_user(user_id, login, user_name)
                 
                 context.user_data.clear()
                 
+                welcome_msg = f"✅ Авторизация успешна!\n👤 Логин: {login}\n👋 Имя: {user_name}{history_msg}"
+                
                 if user_id == ADMIN_ID:
                     await update.message.reply_text(
-                        f"✅ Авторизация успешна! Администратор!",
+                        welcome_msg + "\n🎮 Роль: Администратор",
                         reply_markup=get_main_menu()
                     )
                 else:
                     await update.message.reply_text(
-                        f"✅ Авторизация успешна! {user_name}!",
+                        welcome_msg,
                         reply_markup=get_user_menu()
                     )
             else:
@@ -394,6 +617,7 @@ async def handle_text(update: Update, context: CallbackContext):
         await update.message.reply_text("❌ Требуется авторизация. /start")
         return
     
+    user_login = user_data.get('login', 'Неизвестно')
     current_menu = get_main_menu() if user_id == ADMIN_ID else get_user_menu()
     
     # Обработка меню
@@ -416,6 +640,25 @@ async def handle_text(update: Update, context: CallbackContext):
                 response += f"\nhttps://github.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/blob/main/{NICKS_FILE_PATH}"
             else:
                 response += f"\n⚠️ Данные хранятся локально (GitHub не настроен)"
+            
+            await update.message.reply_text(response, reply_markup=current_menu)
+    
+    elif text == "📋 Мои ники":
+        user_nicks = await get_user_nicks(user_login)
+        
+        if not user_nicks:
+            await update.message.reply_text(
+                f"📭 У вас пока нет проверенных ников.\n"
+                f"👤 Логин: {user_login}",
+                reply_markup=current_menu
+            )
+        else:
+            response = f"📋 Ваши ники (логин: {user_login}):\nВсего: {len(user_nicks)}\n\n"
+            for i, nick_info in enumerate(user_nicks[:20], 1):
+                response += f"{i}. {nick_info['nick']} - {nick_info['date']}\n"
+            
+            if len(user_nicks) > 20:
+                response += f"\n... и еще {len(user_nicks) - 20} ников"
             
             await update.message.reply_text(response, reply_markup=current_menu)
     
@@ -456,25 +699,31 @@ async def handle_text(update: Update, context: CallbackContext):
     
     # Режимы работы
     elif context.user_data.get('mode') == 'check_nick':
-        nick = text.strip().lower()
+        nick = text.lower()
         if nick:
             user_name = user_data['name']
+            user_login = user_data.get('login', 'Неизвестно')
             
             # Проверяем ник
             existing = await get_nick(nick)
             
             if existing:
-                if existing['user_id'] == user_id:
+                if existing.get('user_login') == user_login:
                     await update.message.reply_text(f"❌ Ник '{nick}' уже проверен вами.")
                 else:
-                    await update.message.reply_text(f"❌ Ник '{nick}' занят менеджером {existing['user_name']}.")
+                    existing_login = existing.get('user_login', 'Неизвестно')
+                    await update.message.reply_text(f"❌ Ник '{nick}' занят (логин: {existing_login}).")
             else:
                 # Сохраняем новый ник
-                if await save_nick(nick, user_id, user_name):
+                if await save_nick(nick, user_id, user_name, user_login):
                     all_nicks = await get_all_nicks()
+                    user_nicks = await get_user_nicks(user_login)
+                    
                     await update.message.reply_text(
                         f"✅ Ник '{nick}' свободен и закреплен!\n"
-                        f"📊 Всего ников в базе: {len(all_nicks)}"
+                        f"📊 Всего ников в базе: {len(all_nicks)}\n"
+                        f"👤 Ваших ников: {len(user_nicks)}\n"
+                        f"🔑 Ваш логин: {user_login}"
                     )
                 else:
                     await update.message.reply_text("❌ Ошибка сохранения.")
@@ -482,7 +731,7 @@ async def handle_text(update: Update, context: CallbackContext):
         await update.message.reply_text("Введите следующий ник (или выберите действие из меню):")
     
     elif context.user_data.get('mode') == 'report':
-        report = text.strip()
+        report = text
         if report:
             await update.message.reply_text("✅ Отчет отправлен!", reply_markup=current_menu)
             context.user_data.pop('mode', None)
@@ -500,12 +749,13 @@ async def download_csv(update: Update, context: CallbackContext):
     # Создаем CSV
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['Ник', 'Менеджер', 'Дата проверки', 'Источник'])
+    writer.writerow(['Ник', 'Менеджер', 'Логин', 'Дата проверки', 'Источник'])
     
     for nick_info in all_nicks:
         writer.writerow([
             nick_info['nick'],
             nick_info['manager'],
+            nick_info.get('login', 'Неизвестно'),
             nick_info['date'],
             'GitHub' if GITHUB_TOKEN else 'Локальное'
         ])
