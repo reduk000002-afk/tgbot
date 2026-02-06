@@ -17,13 +17,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ========== КОНФИГУРАЦИЯ ==========
-# ВСТАВЬ СВОЙ ТОКЕН GITHUB ЗДЕСЬ!
 GITHUB_TOKEN = "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"
 TOKEN = "8199840666:AAEMBSi3Y-SIN8cQqnBVso2B7fCKh7fb-Uk"
 GITHUB_REPO_OWNER = "reduk000002-afk"
 GITHUB_REPO_NAME = "tgbot"
 
-# ИЛИ используй переменные окружения (если настроены в Railway)
+# ИЛИ используй переменные окружения
 if os.getenv("GITHUB_TOKEN"):
     GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 if os.getenv("BOT_TOKEN"):
@@ -58,12 +57,13 @@ print(f"👤 Репозиторий: {GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}")
 print("=" * 60)
 
 # ========== УПРОЩЕННЫЕ ФУНКЦИИ ==========
-# Локальное хранилище для быстрой работы
 _local_users = {}
 _local_nicks = {}
 
 async def save_user(telegram_id: str, login: str, name: str) -> bool:
     """Сохранить пользователя в GitHub"""
+    logger.info(f"Сохранение пользователя: {telegram_id}, логин: {login}, имя: {name}")
+    
     if not GITHUB_TOKEN:
         logger.error("❌ GITHUB_TOKEN не настроен! Сохраняю локально")
         _local_users[telegram_id] = {
@@ -73,37 +73,37 @@ async def save_user(telegram_id: str, login: str, name: str) -> bool:
         }
         return True
     
-    # Загружаем текущих пользователей
-    users_data = {"users": {}, "total": 0, "updated": datetime.datetime.now().isoformat()}
-    
     try:
         headers = {'Authorization': f'token {GITHUB_TOKEN}'}
+        users_data = {"users": {}, "total": 0, "updated": datetime.datetime.now().isoformat()}
+        
+        url = f"{GITHUB_API_URL}/{USERS_FILE_PATH}"
         async with aiohttp.ClientSession() as session:
             # Пробуем загрузить существующий файл
-            url = f"{GITHUB_API_URL}/{USERS_FILE_PATH}"
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    content = base64.b64decode(data['content']).decode('utf-8')
-                    users_data = json.loads(content)
-    except:
-        pass  # Файла еще нет, создадим новый
-    
-    # Добавляем пользователя
-    users_data["users"][telegram_id] = {
-        'login': login,
-        'name': name,
-        'auth_date': datetime.datetime.now().isoformat()
-    }
-    users_data["total"] = len(users_data["users"])
-    users_data["updated"] = datetime.datetime.now().isoformat()
-    
-    # Сохраняем обратно
-    try:
+            try:
+                async with session.get(url, headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        content = base64.b64decode(data['content']).decode('utf-8')
+                        users_data = json.loads(content)
+                        logger.info(f"Загружено {len(users_data.get('users', {}))} пользователей с GitHub")
+            except Exception as e:
+                logger.warning(f"Файл пользователей не найден, создаем новый: {e}")
+        
+        # Добавляем пользователя
+        users_data["users"][telegram_id] = {
+            'login': login,
+            'name': name,
+            'auth_date': datetime.datetime.now().isoformat()
+        }
+        users_data["total"] = len(users_data["users"])
+        users_data["updated"] = datetime.datetime.now().isoformat()
+        
+        # Сохраняем обратно
         content = json.dumps(users_data, ensure_ascii=False, indent=2)
         content_base64 = base64.b64encode(content.encode('utf-8')).decode('utf-8')
         
-        # Получаем sha файла (если существует)
+        # Получаем sha файла
         sha = None
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers) as response:
@@ -123,79 +123,65 @@ async def save_user(telegram_id: str, login: str, name: str) -> bool:
             async with session.put(url, headers=headers, json=payload) as response:
                 if response.status in [200, 201]:
                     logger.info(f"✅ Пользователь {name} сохранен на GitHub")
-                    # Сохраняем и локально
                     _local_users[telegram_id] = users_data["users"][telegram_id]
                     return True
+                else:
+                    error_text = await response.text()
+                    logger.error(f"❌ Ошибка сохранения пользователя: {response.status} - {error_text}")
     except Exception as e:
         logger.error(f"❌ Ошибка сохранения на GitHub: {e}")
     
     # Если не удалось сохранить на GitHub, сохраняем локально
-    _local_users[telegram_id] = users_data["users"][telegram_id]
+    _local_users[telegram_id] = {
+        'login': login,
+        'name': name,
+        'auth_date': datetime.datetime.now().isoformat()
+    }
     return True
 
 async def get_user(telegram_id: str) -> Optional[Dict]:
     """Получить пользователя"""
-    # Сначала проверяем локальное хранилище
     if telegram_id in _local_users:
         return _local_users[telegram_id]
-    
-    if not GITHUB_TOKEN:
-        return None
-    
-    try:
-        headers = {'Authorization': f'token {GITHUB_TOKEN}'}
-        url = f"{GITHUB_API_URL}/{USERS_FILE_PATH}"
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    content = base64.b64decode(data['content']).decode('utf-8')
-                    users_data = json.loads(content)
-                    
-                    if telegram_id in users_data.get("users", {}):
-                        user = users_data["users"][telegram_id]
-                        # Кэшируем в локальное хранилище
-                        _local_users[telegram_id] = user
-                        return user
-    except Exception as e:
-        logger.error(f"Ошибка загрузки пользователя с GitHub: {e}")
-    
     return None
 
 async def save_nick(nick: str, manager_id: str, manager_name: str) -> bool:
     """Сохранить ник в GitHub"""
-    # Сначала проверяем локально
-    if nick in _local_nicks:
-        logger.info(f"Ник '{nick}' уже есть в локальном хранилище")
-        return False
+    logger.info(f"Попытка сохранения ника '{nick}' для пользователя {manager_name}")
     
-    # Загружаем текущие ники с GitHub
+    # Сначала загружаем текущие ники с GitHub
     nicks_data = {"nicks": {}, "total": 0, "updated": datetime.datetime.now().isoformat()}
     
-    try:
-        headers = {'Authorization': f'token {GITHUB_TOKEN}'}
-        async with aiohttp.ClientSession() as session:
+    if GITHUB_TOKEN:
+        try:
+            headers = {'Authorization': f'token {GITHUB_TOKEN}'}
             url = f"{GITHUB_API_URL}/{NICKS_FILE_PATH}"
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    content = base64.b64decode(data['content']).decode('utf-8')
-                    nicks_data = json.loads(content)
-                    logger.info(f"✅ Загружено {len(nicks_data.get('nicks', {}))} ников с GitHub")
-                    
-                    # Обновляем локальное хранилище из GitHub
-                    for n, info in nicks_data.get("nicks", {}).items():
-                        _local_nicks[n] = info
-                else:
-                    logger.warning(f"Файл с никами не найден на GitHub, создаем новый")
-    except Exception as e:
-        logger.error(f"Ошибка загрузки ников с GitHub: {e}")
-        # Если не удалось загрузить, работаем с локальными данными
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        content = base64.b64decode(data['content']).decode('utf-8')
+                        nicks_data = json.loads(content)
+                        logger.info(f"✅ Загружено {len(nicks_data.get('nicks', {}))} ников с GitHub")
+                        
+                        # Обновляем локальное хранилище
+                        for n, info in nicks_data.get("nicks", {}).items():
+                            _local_nicks[n] = info
+                    else:
+                        logger.warning(f"Файл ников не найден, создаем новый")
+        except Exception as e:
+            logger.error(f"Ошибка загрузки ников с GitHub: {e}")
+    else:
+        logger.warning("GitHub токен не настроен, работаем локально")
     
-    # Проверяем, есть ли уже такой ник (после загрузки с GitHub)
+    # Проверяем, есть ли уже такой ник
+    if nick in _local_nicks:
+        logger.info(f"❌ Ник '{nick}' уже занят (локально)")
+        return False
+    
     if nick in nicks_data.get("nicks", {}):
-        logger.info(f"❌ Ник '{nick}' уже есть на GitHub")
+        logger.info(f"❌ Ник '{nick}' уже занят (на GitHub)")
         return False
     
     # Добавляем ник
@@ -207,16 +193,19 @@ async def save_nick(nick: str, manager_id: str, manager_name: str) -> bool:
     nicks_data["total"] = len(nicks_data["nicks"])
     nicks_data["updated"] = datetime.datetime.now().isoformat()
     
-    # Сохраняем обратно на GitHub
+    # Сохраняем на GitHub
     if GITHUB_TOKEN:
         try:
             content = json.dumps(nicks_data, ensure_ascii=False, indent=2)
             content_base64 = base64.b64encode(content.encode('utf-8')).decode('utf-8')
             
-            # Получаем sha файла (если существует)
+            # Получаем sha файла
             sha = None
+            headers = {'Authorization': f'token {GITHUB_TOKEN}'}
+            url = f"{GITHUB_API_URL}/{NICKS_FILE_PATH}"
+            
             async with aiohttp.ClientSession() as session:
-                async with session.get(f"{GITHUB_API_URL}/{NICKS_FILE_PATH}", headers=headers) as response:
+                async with session.get(url, headers=headers) as response:
                     if response.status == 200:
                         file_info = await response.json()
                         sha = file_info.get('sha')
@@ -230,61 +219,32 @@ async def save_nick(nick: str, manager_id: str, manager_name: str) -> bool:
                 payload["sha"] = sha
             
             async with aiohttp.ClientSession() as session:
-                async with session.put(f"{GITHUB_API_URL}/{NICKS_FILE_PATH}", headers=headers, json=payload) as response:
+                async with session.put(url, headers=headers, json=payload) as response:
                     if response.status in [200, 201]:
-                        logger.info(f"✅ Ник '{nick}' сохранен на GitHub")
-                        # Сохраняем и локально
+                        logger.info(f"✅ Ник '{nick}' успешно сохранен на GitHub!")
                         _local_nicks[nick] = nicks_data["nicks"][nick]
                         return True
                     else:
                         error_text = await response.text()
-                        logger.error(f"❌ Ошибка сохранения на GitHub: {response.status} - {error_text}")
+                        logger.error(f"❌ Ошибка сохранения ника: {response.status} - {error_text}")
                         return False
         except Exception as e:
-            logger.error(f"❌ Ошибка сохранения ника на GitHub: {e}")
+            logger.error(f"❌ Ошибка при сохранении на GitHub: {e}")
             return False
     else:
-        # Если нет GitHub токена, сохраняем только локально
-        logger.error("❌ GITHUB_TOKEN не настроен! Сохраняю локально")
+        # Сохраняем локально
         _local_nicks[nick] = nicks_data["nicks"][nick]
+        logger.info(f"✅ Ник '{nick}' сохранен локально")
         return True
 
 async def get_nick(nick: str) -> Optional[Dict]:
     """Получить информацию о нике"""
-    # Сначала проверяем локальное хранилище
-    if nick in _local_nicks:
-        return _local_nicks[nick]
-    
-    if not GITHUB_TOKEN:
-        return None
-    
-    try:
-        headers = {'Authorization': f'token {GITHUB_TOKEN}'}
-        url = f"{GITHUB_API_URL}/{NICKS_FILE_PATH}"
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    content = base64.b64decode(data['content']).decode('utf-8')
-                    nicks_data = json.loads(content)
-                    
-                    if nick in nicks_data.get("nicks", {}):
-                        nick_info = nicks_data["nicks"][nick]
-                        # Кэшируем в локальное хранилище
-                        _local_nicks[nick] = nick_info
-                        return nick_info
-    except Exception as e:
-        logger.error(f"Ошибка загрузки ника с GitHub: {e}")
-    
-    return None
+    return _local_nicks.get(nick)
 
 async def get_all_nicks() -> List[Dict]:
     """Получить все ники"""
-    all_nicks = []
-    
-    # Сначала пробуем загрузить с GitHub
-    if GITHUB_TOKEN:
+    # Загружаем с GitHub при первом обращении
+    if GITHUB_TOKEN and not _local_nicks:
         try:
             headers = {'Authorization': f'token {GITHUB_TOKEN}'}
             url = f"{GITHUB_API_URL}/{NICKS_FILE_PATH}"
@@ -296,15 +256,14 @@ async def get_all_nicks() -> List[Dict]:
                         content = base64.b64decode(data['content']).decode('utf-8')
                         nicks_data = json.loads(content)
                         
-                        # Обновляем локальное хранилище
                         for nick, info in nicks_data.get("nicks", {}).items():
                             _local_nicks[nick] = info
                         
-                        logger.info(f"Загружено {len(nicks_data.get('nicks', {}))} ников с GitHub")
+                        logger.info(f"Инициализировано {len(_local_nicks)} ников из GitHub")
         except Exception as e:
-            logger.error(f"Ошибка загрузки ников с GitHub: {e}")
+            logger.error(f"Ошибка загрузки ников: {e}")
     
-    # Теперь используем локальное хранилище (оно уже обновлено из GitHub)
+    all_nicks = []
     for nick, info in _local_nicks.items():
         date = info.get('check_date', '')[:10]
         all_nicks.append({
@@ -313,7 +272,6 @@ async def get_all_nicks() -> List[Dict]:
             'date': date or 'Нет даты'
         })
     
-    # Сортируем по дате
     all_nicks.sort(key=lambda x: x['date'], reverse=True)
     return all_nicks
 
@@ -345,6 +303,9 @@ def get_user_menu():
 async def start(update: Update, context: CallbackContext):
     """Обработчик команды /start"""
     user_id = str(update.effective_user.id)
+    user_name = update.effective_user.full_name
+    
+    logger.info(f"Команда /start от {user_id} ({user_name})")
     
     user_data = await get_user(user_id)
     if user_data:
@@ -367,9 +328,12 @@ async def handle_text(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
     text = update.message.text.strip()
     
+    logger.info(f"Сообщение от {user_id}: '{text}'")
+    
     # Авторизация
     if 'auth_step' in context.user_data:
         if context.user_data['auth_step'] == 'login':
+            logger.info(f"Проверка логина: '{text}'")
             if text == VALID_LOGIN:
                 context.user_data['auth_step'] = 'password'
                 context.user_data['login'] = text
@@ -378,16 +342,16 @@ async def handle_text(update: Update, context: CallbackContext):
                 await update.message.reply_text("❌ Неверный логин. Введите логин:")
         
         elif context.user_data['auth_step'] == 'password':
+            login = context.user_data.get('login', '')
+            logger.info(f"Проверка пароля для '{login}': введено '{text}'")
             if text == VALID_PASSWORD:
                 user_name = update.effective_user.full_name
-                login = context.user_data['login']
                 
-                # Сохраняем пользователя
                 success = await save_user(user_id, login, user_name)
                 if success:
-                    logger.info(f"Пользователь {user_name} сохранен")
+                    logger.info(f"✅ Авторизация успешна для {user_name}")
                 else:
-                    logger.error(f"Ошибка сохранения пользователя {user_name}")
+                    logger.error(f"❌ Ошибка сохранения пользователя {user_name}")
                 
                 context.user_data.clear()
                 
@@ -402,6 +366,7 @@ async def handle_text(update: Update, context: CallbackContext):
                         reply_markup=get_user_menu()
                     )
             else:
+                logger.warning(f"❌ Неверный пароль для логина '{login}'")
                 await update.message.reply_text("❌ Неверный пароль. /start")
                 context.user_data.clear()
         return
@@ -409,6 +374,7 @@ async def handle_text(update: Update, context: CallbackContext):
     # Проверяем авторизацию
     user_data = await get_user(user_id)
     if not user_data:
+        logger.warning(f"Пользователь {user_id} не авторизован")
         await update.message.reply_text("❌ Требуется авторизация. /start")
         return
     
@@ -472,11 +438,13 @@ async def handle_text(update: Update, context: CallbackContext):
             reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/start")]], resize_keyboard=True)
         )
     
-    # Режимы работы
+    # Режим проверки ника
     elif context.user_data.get('mode') == 'check_nick':
         nick = text.strip().lower()
         if nick:
             user_name = user_data['name']
+            
+            logger.info(f"Проверка ника '{nick}' для пользователя {user_name}")
             
             # Проверяем ник
             existing = await get_nick(nick)
@@ -488,7 +456,6 @@ async def handle_text(update: Update, context: CallbackContext):
                     await update.message.reply_text(f"❌ Ник '{nick}' занят менеджером {existing['user_name']}.")
             else:
                 # Сохраняем новый ник
-                logger.info(f"Пробуем сохранить ник '{nick}' для пользователя {user_name}")
                 success = await save_nick(nick, user_id, user_name)
                 if success:
                     all_nicks = await get_all_nicks()
@@ -550,7 +517,8 @@ def main():
     
     print("🤖 Telegram бот запущен и готов к работе")
     print("📲 Используйте /start в Telegram для начала работы")
-    print("ℹ️  Логи: test, пароль: 12345")
+    print("ℹ️  Логин: test, пароль: 12345")
+    print("⚠️  Проверяй логи в Railway для отладки!")
     
     # Запускаем бота
     application.run_polling()
