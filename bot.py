@@ -6,8 +6,11 @@ import csv
 import io
 import base64
 import asyncio
+import threading
 from typing import Dict, List, Optional
 import aiohttp
+import socketserver
+from http.server import BaseHTTPRequestHandler
 
 # Настройка логирования
 logging.basicConfig(
@@ -36,6 +39,28 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/contents"
 NICKS_FILE_PATH = "nicks_database.json"
 USERS_FILE_PATH = "users_database.json"
+
+# ========== ПРОСТОЙ HTTP СЕРВЕР ДЛЯ HEALTHCHECK ==========
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/health':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b'OK')
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def log_message(self, format, *args):
+        pass  # Отключаем логи
+
+def run_health_server():
+    """Запуск простого HTTP сервера для healthcheck"""
+    port = int(os.getenv('PORT', 8080))
+    with socketserver.TCPServer(("", port), HealthHandler) as httpd:
+        logger.info(f"✅ Health check сервер запущен на порту {port}")
+        httpd.serve_forever()
 
 # ========== GITHUB ФУНКЦИИ ==========
 async def get_github_file_content(filename: str) -> Optional[Dict]:
@@ -414,16 +439,6 @@ async def handle_text(update: Update, context: CallbackContext):
     elif context.user_data.get('mode') == 'report':
         report = text.strip()
         if report:
-            # Сохраняем отчет локально (для примера)
-            report_data = {
-                "user_id": user_id,
-                "user_name": user_data['name'],
-                "report": report,
-                "date": datetime.datetime.now().isoformat()
-            }
-            
-            # Можно сохранить отчет в отдельный файл на GitHub
-            # Для простоты просто подтверждаем
             await update.message.reply_text("✅ Отчет отправлен!", reply_markup=current_menu)
             context.user_data.pop('mode', None)
             
@@ -466,34 +481,14 @@ async def download_csv(update: Update, context: CallbackContext):
         caption=f"📊 База ников с GitHub\n✅ Записей: {len(all_nicks)}\n📁 Файл: {NICKS_FILE_PATH}"
     )
 
-# ========== ПРОСТОЙ HTTP ЭНДПОИНТ ДЛЯ HEALTHCHECK ==========
-from http.server import BaseHTTPRequestHandler
-import http.server
-import socketserver
-
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == '/health':
-            self.send_response(200)
-            self.send_header('Content-type', 'text/plain')
-            self.end_headers()
-            self.wfile.write(b'OK')
-        else:
-            self.send_response(404)
-            self.end_headers()
-    
-    def log_message(self, format, *args):
-        pass  # Отключаем логи
-
-def run_health_server():
-    """Запуск простого HTTP сервера для healthcheck"""
-    port = int(os.getenv('PORT', 8080))
-    with socketserver.TCPServer(("", port), HealthHandler) as httpd:
-        print(f"✅ Health check сервер запущен на порту {port}")
-        httpd.serve_forever()
-
 # ========== ОСНОВНАЯ ФУНКЦИЯ ==========
-async def main():
+def start_health_server_in_thread():
+    """Запуск HTTP сервера в отдельном потоке"""
+    health_thread = threading.Thread(target=run_health_server, daemon=True)
+    health_thread.start()
+    return health_thread
+
+def main():
     """Основная функция запуска бота"""
     print("=" * 60)
     print("🚀 Telegram Bot with GitHub Storage")
@@ -516,10 +511,9 @@ async def main():
     else:
         print("✅ GitHub токен настроен")
     
-    # Запускаем HTTP сервер в отдельном потоке
-    import threading
-    health_thread = threading.Thread(target=run_health_server, daemon=True)
-    health_thread.start()
+    # Запускаем HTTP сервер для healthcheck
+    health_thread = start_health_server_in_thread()
+    print("✅ Health check сервер запущен")
     
     # Даем время серверу запуститься
     import time
@@ -537,8 +531,7 @@ async def main():
     print("=" * 60)
     
     # Запускаем бота
-    await application.run_polling()
+    application.run_polling()
 
 if __name__ == '__main__':
-    # Запускаем асинхронный код
-    asyncio.run(main())
+    main()
