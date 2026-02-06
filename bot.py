@@ -4,17 +4,23 @@ import json
 import datetime
 import csv
 import io
-import sys
+import base64
+import asyncio
+from typing import Dict, List, Optional
+import aiohttp
 
+# Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
+logger = logging.getLogger(__name__)
 
+# Конфигурация из переменных окружения
 TOKEN = os.getenv("BOT_TOKEN", "8199840666:AAEMBSi3Y-SIN8cQqnBVso2B7fCKh7fb-Uk")
-
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+GITHUB_REPO_OWNER = os.getenv("GITHUB_REPO_OWNER", "reduk000002-afk")
+GITHUB_REPO_NAME = os.getenv("GITHUB_REPO_NAME", "tgbot")
 
 # Логин и пароль
 VALID_LOGIN = "test"
@@ -23,166 +29,217 @@ VALID_PASSWORD = "12345"
 # Твой Telegram ID
 ADMIN_ID = "7333863565"
 
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
+
 print("=" * 60)
-print("🔍 Проверяю подключение к PostgreSQL...")
+print("🔍 Проверяю конфигурацию GitHub...")
 
-# ========== ПРОВЕРКА POSTGRESQL ==========
-def check_postgresql():
-    """Проверить доступность PostgreSQL"""
-    # Проверяем все возможные переменные
-    env_vars = [
-        'DATABASE_URL',
-        'PGHOST', 'PGPORT', 'PGDATABASE', 'PGUSER', 'PGPASSWORD',
-        'RAILWAY_PGURL', 'RAILWAY_POSTGRES_URL'
-    ]
-    
-    print("📊 Доступные переменные окружения:")
-    for var in env_vars:
-        value = os.getenv(var)
-        if value:
-            print(f"  ✅ {var}: {value[:50]}..." if len(str(value)) > 50 else f"  ✅ {var}: {value}")
-        else:
-            print(f"  ❌ {var}: Нет")
-    
-    # Проверяем есть ли вообще PostgreSQL переменные
-    has_pg_vars = any(os.getenv(var) for var in ['DATABASE_URL', 'PGHOST'])
-    
-    if has_pg_vars:
-        print("✅ PostgreSQL найден в Railway")
-        return True
-    else:
-        print("❌ PostgreSQL не найден. Используем локальные файлы.")
-        return False
+# ========== НАСТРОЙКИ GITHUB ==========
+GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/contents"
+NICKS_FILE_PATH = "nicks_database.json"
+USERS_FILE_PATH = "users_database.json"
 
-HAS_POSTGRESQL = check_postgresql()
-
-# ========== РЕЖИМ РАБОТЫ ==========
-if HAS_POSTGRESQL:
-    print("🚀 Используем PostgreSQL")
+async def get_github_file_content(filename: str) -> Optional[Dict]:
+    """Получить содержимое файла с GitHub"""
+    if not GITHUB_TOKEN:
+        logger.error("❌ GITHUB_TOKEN не настроен")
+        return None
     
-    import psycopg2
-    from urllib.parse import urlparse
+    headers = {
+        'Authorization': f'token {GITHUB_TOKEN}',
+        'Accept': 'application/vnd.github.v3+json'
+    }
     
-    def get_connection():
-        """Получить подключение к PostgreSQL"""
+    url = f"{GITHUB_API_URL}/{filename}"
+    
+    async with aiohttp.ClientSession() as session:
         try:
-            # Пробуем DATABASE_URL
-            database_url = os.getenv("DATABASE_URL")
-            if database_url:
-                if database_url.startswith("postgres://"):
-                    database_url = database_url.replace("postgres://", "postgresql://")
-                return psycopg2.connect(database_url, sslmode='require')
+            async with session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    content = data.get('content', '')
+                    if content:
+                        # Декодируем base64
+                        json_content = base64.b64decode(content).decode('utf-8')
+                        return json.loads(json_content)
+                    return {}
+                elif response.status == 404:
+                    logger.info(f"📄 Файл {filename} не найден, создадим при сохранении")
+                    return {}
+                else:
+                    logger.error(f"❌ Ошибка GitHub API: {response.status}")
+                    return {}
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения файла: {e}")
+            return {}
+
+async def save_to_github_file(filename: str, data: Dict) -> bool:
+    """Сохранить данные в файл на GitHub"""
+    if not GITHUB_TOKEN:
+        logger.error("❌ GITHUB_TOKEN не настроен")
+        return False
+    
+    headers = {
+        'Authorization': f'token {GITHUB_TOKEN}',
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json'
+    }
+    
+    url = f"{GITHUB_API_URL}/{filename}"
+    
+    # Сначала получаем текущий файл, чтобы получить sha (если существует)
+    async with aiohttp.ClientSession() as session:
+        try:
+            # Получаем информацию о файле
+            async with session.get(url, headers=headers) as response:
+                sha = None
+                if response.status == 200:
+                    file_info = await response.json()
+                    sha = file_info.get('sha')
             
-            # Пробуем отдельные параметры
-            conn_params = {
-                'host': os.getenv("PGHOST"),
-                'port': os.getenv("PGPORT", 5432),
-                'database': os.getenv("PGDATABASE"),
-                'user': os.getenv("PGUSER"),
-                'password': os.getenv("PGPASSWORD")
+            # Подготавливаем данные для отправки
+            content = json.dumps(data, ensure_ascii=False, indent=2)
+            content_base64 = base64.b64encode(content.encode('utf-8')).decode('utf-8')
+            
+            payload = {
+                "message": f"Update {filename} via bot",
+                "content": content_base64,
+                "branch": "main"
             }
             
-            if all(conn_params.values()):
-                conn_params['sslmode'] = 'require'
-                return psycopg2.connect(**conn_params)
+            if sha:
+                payload["sha"] = sha
             
-            return None
+            # Отправляем обновление
+            async with session.put(url, headers=headers, json=payload) as response:
+                if response.status in [200, 201]:
+                    logger.info(f"✅ Файл {filename} сохранен на GitHub")
+                    
+                    # Выводим ссылку на файл
+                    file_url = f"https://github.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/blob/main/{filename}"
+                    print(f"📁 Файл доступен по ссылке: {file_url}")
+                    return True
+                else:
+                    error_text = await response.text()
+                    logger.error(f"❌ Ошибка сохранения: {response.status} - {error_text}")
+                    return False
+                    
         except Exception as e:
-            print(f"❌ Ошибка подключения: {e}")
-            return None
-    
-    def init_postgresql():
-        """Инициализировать PostgreSQL таблицы"""
-        conn = get_connection()
-        if not conn:
-            print("❌ Не удалось подключиться к PostgreSQL")
+            logger.error(f"❌ Ошибка сохранения файла: {e}")
             return False
-        
-        try:
-            cur = conn.cursor()
-            
-            # Таблица ников
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS bot_nicks (
-                    id SERIAL PRIMARY KEY,
-                    nick VARCHAR(100) UNIQUE NOT NULL,
-                    manager_id VARCHAR(50) NOT NULL,
-                    manager_name VARCHAR(100) NOT NULL,
-                    check_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # Таблица пользователей
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS bot_users (
-                    id SERIAL PRIMARY KEY,
-                    telegram_id VARCHAR(50) UNIQUE NOT NULL,
-                    login VARCHAR(50) NOT NULL,
-                    name VARCHAR(100) NOT NULL,
-                    auth_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            conn.commit()
-            cur.close()
-            conn.close()
-            
-            print("✅ Таблицы PostgreSQL созданы")
-            return True
-            
-        except Exception as e:
-            print(f"❌ Ошибка создания таблиц: {e}")
-            return False
-    
-    # Инициализируем базу
-    if not init_postgresql():
-        print("⚠️ Переключаемся на локальные файлы")
-        HAS_POSTGRESQL = False
 
-# ========== ЛОКАЛЬНЫЕ ФАЙЛЫ ==========
-if not HAS_POSTGRESQL:
-    print("💾 Используем локальные файлы")
-    
-    USERS_FILE = "user.json"
-    NICKS_FILE = "nicks.json"
-    REPORTS_FILE = "report.json"
-    
-    def load_json(filename):
-        try:
-            if not os.path.exists(filename):
-                return {}
-            with open(filename, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except:
-            return {}
-    
-    def save_json(filename, data):
-        try:
-            with open(filename, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except:
-            pass
-    
-    # Загружаем данные
-    users_db = load_json(USERS_FILE)
-    nicks_db = load_json(NICKS_FILE)
-    reports_db = load_json(REPORTS_FILE)
+# ========== ФУНКЦИИ ДЛЯ РАБОТЫ С ДАННЫМИ ==========
+async def load_nicks() -> Dict:
+    """Загрузить ники из GitHub"""
+    nicks = await get_github_file_content(NICKS_FILE_PATH)
+    if nicks is None:
+        return {}
+    return nicks
 
-# ========== ОБЩИЕ ФУНКЦИИ ==========
+async def load_users() -> Dict:
+    """Загрузить пользователей из GitHub"""
+    users = await get_github_file_content(USERS_FILE_PATH)
+    if users is None:
+        return {}
+    return users
+
+async def save_nick(nick: str, manager_id: str, manager_name: str) -> bool:
+    """Сохранить ник в базу"""
+    nicks = await load_nicks()
+    
+    # Если файла нет, создаем структуру
+    if "nicks" not in nicks:
+        nicks = {"nicks": {}, "total": 0, "updated": datetime.datetime.now().isoformat()}
+    
+    # Проверяем, есть ли уже такой ник
+    if nick in nicks["nicks"]:
+        return False
+    
+    # Добавляем ник
+    nicks["nicks"][nick] = {
+        'user_id': manager_id,
+        'user_name': manager_name,
+        'check_date': datetime.datetime.now().isoformat()
+    }
+    nicks["total"] = len(nicks["nicks"])
+    nicks["updated"] = datetime.datetime.now().isoformat()
+    
+    # Сохраняем на GitHub
+    return await save_to_github_file(NICKS_FILE_PATH, nicks)
+
+async def get_nick(nick: str) -> Optional[Dict]:
+    """Получить информацию о нике"""
+    nicks = await load_nicks()
+    if "nicks" in nicks and nick in nicks["nicks"]:
+        return nicks["nicks"][nick]
+    return None
+
+async def get_all_nicks() -> List[Dict]:
+    """Получить все ники"""
+    nicks = await load_nicks()
+    if "nicks" not in nicks:
+        return []
+    
+    all_nicks = []
+    for nick, info in nicks["nicks"].items():
+        date = info.get('check_date', '')
+        if date and len(date) > 10:
+            date = date[:10]  # Берем только дату
+            
+        all_nicks.append({
+            'nick': nick,
+            'manager': info.get('user_name', ''),
+            'date': date
+        })
+    
+    # Сортируем по дате (новые первые)
+    all_nicks.sort(key=lambda x: x['date'], reverse=True)
+    return all_nicks
+
+async def save_user(telegram_id: str, login: str, name: str) -> bool:
+    """Сохранить пользователя"""
+    users = await load_users()
+    
+    # Если файла нет, создаем структуру
+    if "users" not in users:
+        users = {"users": {}, "total": 0, "updated": datetime.datetime.now().isoformat()}
+    
+    # Добавляем/обновляем пользователя
+    users["users"][telegram_id] = {
+        'login': login,
+        'name': name,
+        'auth_date': datetime.datetime.now().isoformat()
+    }
+    users["total"] = len(users["users"])
+    users["updated"] = datetime.datetime.now().isoformat()
+    
+    # Сохраняем на GitHub
+    return await save_to_github_file(USERS_FILE_PATH, users)
+
+async def get_user(telegram_id: str) -> Optional[Dict]:
+    """Получить пользователя"""
+    users = await load_users()
+    if "users" in users and telegram_id in users["users"]:
+        return users["users"][telegram_id]
+    return None
+
+# ========== ФУНКЦИИ ИНТЕРФЕЙСА ==========
 def get_main_menu():
+    """Меню для администратора"""
     keyboard = [
         [KeyboardButton("🔍 Проверка ников")],
         [KeyboardButton("📊 История ников")],
         [KeyboardButton("📝 Отправить отчет")],
         [KeyboardButton("💾 Резервная копия")],
         [KeyboardButton("📥 Скачать базу")],
+        [KeyboardButton("🌐 Показать GitHub файл")],
         [KeyboardButton("❌ Выход")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 def get_user_menu():
+    """Меню для обычных пользователей"""
     keyboard = [
         [KeyboardButton("🔍 Проверка ников")],
         [KeyboardButton("📊 История ников")],
@@ -191,180 +248,30 @@ def get_user_menu():
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-# ========== POSTGRESQL ФУНКЦИИ ==========
-if HAS_POSTGRESQL:
-    def save_nick(nick, manager_id, manager_name):
-        """Сохранить ник в PostgreSQL"""
-        conn = get_connection()
-        if not conn:
-            return False
-        
-        try:
-            cur = conn.cursor()
-            cur.execute("""
-                INSERT INTO bot_nicks (nick, manager_id, manager_name) 
-                VALUES (%s, %s, %s)
-                ON CONFLICT (nick) DO NOTHING
-            """, (nick, manager_id, manager_name))
-            conn.commit()
-            cur.close()
-            conn.close()
-            return True
-        except Exception as e:
-            print(f"❌ Ошибка сохранения ника: {e}")
-            return False
-    
-    def get_nick(nick):
-        """Получить ник из PostgreSQL"""
-        conn = get_connection()
-        if not conn:
-            return None
-        
-        try:
-            cur = conn.cursor()
-            cur.execute("SELECT manager_id, manager_name FROM bot_nicks WHERE nick = %s", (nick,))
-            result = cur.fetchone()
-            cur.close()
-            conn.close()
-            
-            if result:
-                return {
-                    'user_id': result[0],
-                    'user_name': result[1]
-                }
-            return None
-        except Exception as e:
-            print(f"❌ Ошибка получения ника: {e}")
-            return None
-    
-    def get_all_nicks():
-        """Получить все ники"""
-        conn = get_connection()
-        if not conn:
-            return []
-        
-        try:
-            cur = conn.cursor()
-            cur.execute("SELECT nick, manager_name, check_date FROM bot_nicks ORDER BY check_date DESC")
-            results = cur.fetchall()
-            cur.close()
-            conn.close()
-            
-            nicks = []
-            for nick, manager, date in results:
-                nicks.append({
-                    'nick': nick,
-                    'manager': manager,
-                    'date': date.isoformat() if date else ''
-                })
-            return nicks
-        except Exception as e:
-            print(f"❌ Ошибка получения ников: {e}")
-            return []
-    
-    def save_user(telegram_id, login, name):
-        """Сохранить пользователя"""
-        conn = get_connection()
-        if not conn:
-            return False
-        
-        try:
-            cur = conn.cursor()
-            cur.execute("""
-                INSERT INTO bot_users (telegram_id, login, name) 
-                VALUES (%s, %s, %s)
-                ON CONFLICT (telegram_id) DO UPDATE 
-                SET login = EXCLUDED.login, name = EXCLUDED.name
-            """, (telegram_id, login, name))
-            conn.commit()
-            cur.close()
-            conn.close()
-            return True
-        except Exception as e:
-            print(f"❌ Ошибка сохранения пользователя: {e}")
-            return False
-    
-    def get_user(telegram_id):
-        """Получить пользователя"""
-        conn = get_connection()
-        if not conn:
-            return None
-        
-        try:
-            cur = conn.cursor()
-            cur.execute("SELECT login, name FROM bot_users WHERE telegram_id = %s", (telegram_id,))
-            result = cur.fetchone()
-            cur.close()
-            conn.close()
-            
-            if result:
-                return {
-                    'login': result[0],
-                    'name': result[1]
-                }
-            return None
-        except Exception as e:
-            print(f"❌ Ошибка получения пользователя: {e}")
-            return None
-
-# ========== ЛОКАЛЬНЫЕ ФУНКЦИИ ==========
-else:
-    def save_nick(nick, manager_id, manager_name):
-        """Сохранить ник в локальный файл"""
-        nicks_db[nick] = {
-            'user_id': manager_id,
-            'user_name': manager_name,
-            'check_date': datetime.datetime.now().isoformat()
-        }
-        save_json(NICKS_FILE, nicks_db)
-        return True
-    
-    def get_nick(nick):
-        """Получить ник из локального файла"""
-        return nicks_db.get(nick)
-    
-    def get_all_nicks():
-        """Получить все ники"""
-        all_nicks = []
-        for nick, info in nicks_db.items():
-            all_nicks.append({
-                'nick': nick,
-                'manager': info.get('user_name', ''),
-                'date': info.get('check_date', '')[:10]
-            })
-        # Сортируем по дате
-        all_nicks.sort(key=lambda x: x['date'], reverse=True)
-        return all_nicks
-    
-    def save_user(telegram_id, login, name):
-        """Сохранить пользователя"""
-        users_db[telegram_id] = {
-            'login': login,
-            'name': name,
-            'auth_date': datetime.datetime.now().isoformat()
-        }
-        save_json(USERS_FILE, users_db)
-        return True
-    
-    def get_user(telegram_id):
-        """Получить пользователя"""
-        return users_db.get(telegram_id)
-
-# ========== ОСНОВНОЙ КОД ==========
-def start(update: Update, context: CallbackContext):
+# ========== ОСНОВНЫЕ ФУНКЦИИ БОТА ==========
+async def start(update: Update, context: CallbackContext):
+    """Обработчик команды /start"""
     user_id = str(update.effective_user.id)
     
-    user_data = get_user(user_id)
+    user_data = await get_user(user_id)
     if user_data:
         if user_id == ADMIN_ID:
-            update.message.reply_text(f"✅ Добро пожаловать, Администратор!", reply_markup=get_main_menu())
+            await update.message.reply_text(
+                f"✅ Добро пожаловать, Администратор!\n"
+                f"📊 Файлы хранятся на GitHub",
+                reply_markup=get_main_menu()
+            )
         else:
-            update.message.reply_text(f"✅ Добро пожаловать, {user_data['name']}!", reply_markup=get_user_menu())
+            await update.message.reply_text(
+                f"✅ Добро пожаловать, {user_data['name']}!",
+                reply_markup=get_user_menu()
+            )
     else:
         context.user_data['auth_step'] = 'login'
-        update.message.reply_text("Введите логин:")
+        await update.message.reply_text("Введите логин:")
 
-def handle_text(update: Update, context: CallbackContext):
+async def handle_text(update: Update, context: CallbackContext):
+    """Обработчик текстовых сообщений"""
     user_id = str(update.effective_user.id)
     text = update.message.text
     
@@ -374,9 +281,9 @@ def handle_text(update: Update, context: CallbackContext):
             if text == VALID_LOGIN:
                 context.user_data['auth_step'] = 'password'
                 context.user_data['login'] = text
-                update.message.reply_text("Введите пароль:")
+                await update.message.reply_text("Введите пароль:")
             else:
-                update.message.reply_text("❌ Неверный логин. Введите логин:")
+                await update.message.reply_text("❌ Неверный логин. Введите логин:")
         
         elif context.user_data['auth_step'] == 'password':
             if text == VALID_PASSWORD:
@@ -384,64 +291,90 @@ def handle_text(update: Update, context: CallbackContext):
                 login = context.user_data['login']
                 
                 # Сохраняем пользователя
-                save_user(user_id, login, user_name)
+                success = await save_user(user_id, login, user_name)
                 
                 context.user_data.clear()
                 
                 if user_id == ADMIN_ID:
-                    update.message.reply_text(f"✅ Авторизация успешна! Администратор!", reply_markup=get_main_menu())
+                    await update.message.reply_text(
+                        f"✅ Авторизация успешна! Администратор!\n"
+                        f"📁 Данные сохраняются на GitHub",
+                        reply_markup=get_main_menu()
+                    )
                 else:
-                    update.message.reply_text(f"✅ Авторизация успешна! {user_name}!", reply_markup=get_user_menu())
+                    await update.message.reply_text(
+                        f"✅ Авторизация успешна! {user_name}!",
+                        reply_markup=get_user_menu()
+                    )
             else:
-                update.message.reply_text("❌ Неверный пароль. /start")
+                await update.message.reply_text("❌ Неверный пароль. /start")
                 context.user_data.clear()
         return
     
     # Проверка авторизации
-    user_data = get_user(user_id)
+    user_data = await get_user(user_id)
     if not user_data:
-        update.message.reply_text("❌ Требуется авторизация. /start")
+        await update.message.reply_text("❌ Требуется авторизация. /start")
         return
     
     current_menu = get_main_menu() if user_id == ADMIN_ID else get_user_menu()
     
     # Меню
     if text == "🔍 Проверка ников":
-        update.message.reply_text("Введите ник для проверки:")
+        await update.message.reply_text("Введите ник для проверки:")
         context.user_data['mode'] = 'check_nick'
     
     elif text == "📊 История ников":
-        all_nicks = get_all_nicks()
+        all_nicks = await get_all_nicks()
         
         if not all_nicks:
-            update.message.reply_text("📭 В базе нет ников.", reply_markup=current_menu)
+            await update.message.reply_text("📭 В базе нет ников.", reply_markup=current_menu)
         else:
-            response = f"📋 Последние 10 ников (всего: {len(all_nicks)}):\n\n"
+            # Получаем статистику
+            nicks_data = await load_nicks()
+            total = nicks_data.get('total', 0) if isinstance(nicks_data, dict) else 0
+            
+            response = f"📋 Последние 10 ников (всего: {total}):\n\n"
             for i, nick_info in enumerate(all_nicks[:10], 1):
                 response += f"{i}. {nick_info['nick']} - {nick_info['manager']} ({nick_info['date']})\n"
             
-            update.message.reply_text(response, reply_markup=current_menu)
+            response += f"\n📁 Файл на GitHub:"
+            response += f"\nhttps://github.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/blob/main/{NICKS_FILE_PATH}"
+            
+            await update.message.reply_text(response, reply_markup=current_menu)
     
     elif text == "📝 Отправить отчет":
-        update.message.reply_text("Напишите текст отчета:")
+        await update.message.reply_text("Напишите текст отчета:")
         context.user_data['mode'] = 'report'
     
     elif text == "💾 Резервная копия":
         if user_id == ADMIN_ID:
-            # Для PostgreSQL - экспорт в CSV
-            download_csv(update, context)
+            await download_csv(update, context)
         else:
-            update.message.reply_text("❌ Только для администратора")
+            await update.message.reply_text("❌ Только для администратора")
     
     elif text == "📥 Скачать базу":
         if user_id == ADMIN_ID:
-            download_csv(update, context)
+            await download_csv(update, context)
         else:
-            update.message.reply_text("❌ Только для администратора")
+            await update.message.reply_text("❌ Только для администратора")
+    
+    elif text == "🌐 Показать GitHub файл":
+        if user_id == ADMIN_ID:
+            file_url = f"https://github.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/blob/main/{NICKS_FILE_PATH}"
+            await update.message.reply_text(
+                f"📁 Файл с никами на GitHub:\n{file_url}\n\n"
+                f"👀 Можно смотреть прямо в браузере",
+                reply_markup=current_menu
+            )
+        else:
+            await update.message.reply_text("❌ Только для администратора")
     
     elif text == "❌ Выход":
-        update.message.reply_text("👋 Вы вышли. /start", 
-                                reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/start")]], resize_keyboard=True))
+        await update.message.reply_text(
+            "👋 Вы вышли. /start", 
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/start")]], resize_keyboard=True)
+        )
     
     # Режимы
     elif context.user_data.get('mode') == 'check_nick':
@@ -450,89 +383,104 @@ def handle_text(update: Update, context: CallbackContext):
             user_name = user_data['name']
             
             # Проверяем ник
-            existing = get_nick(nick)
+            existing = await get_nick(nick)
             
             if existing:
                 if existing['user_id'] == user_id:
-                    update.message.reply_text(f"❌ Ник '{nick}' уже проверен вами.")
+                    await update.message.reply_text(f"❌ Ник '{nick}' уже проверен вами.")
                 else:
-                    update.message.reply_text(f"❌ Ник '{nick}' занят менеджером {existing['user_name']}.")
+                    await update.message.reply_text(f"❌ Ник '{nick}' занят менеджером {existing['user_name']}.")
             else:
                 # Сохраняем новый ник
-                if save_nick(nick, user_id, user_name):
-                    update.message.reply_text(f"✅ Ник '{nick}' свободен и закреплен!")
+                if await save_nick(nick, user_id, user_name):
+                    # Получаем обновленную статистику
+                    nicks_data = await load_nicks()
+                    total = nicks_data.get('total', 0) if isinstance(nicks_data, dict) else 0
+                    
+                    await update.message.reply_text(
+                        f"✅ Ник '{nick}' свободен и закреплен!\n"
+                        f"📊 Всего ников в базе: {total}\n"
+                        f"💾 Сохранено на GitHub"
+                    )
                 else:
-                    update.message.reply_text("❌ Ошибка сохранения.")
+                    await update.message.reply_text("❌ Ошибка сохранения.")
         
-        update.message.reply_text("Введите следующий ник:")
+        await update.message.reply_text("Введите следующий ник:")
     
     elif context.user_data.get('mode') == 'report':
         report = text.strip()
         if report:
             # Просто подтверждаем
-            update.message.reply_text("✅ Отчет отправлен!", reply_markup=current_menu)
+            await update.message.reply_text("✅ Отчет отправлен!", reply_markup=current_menu)
             context.user_data.pop('mode', None)
         else:
-            update.message.reply_text("❌ Отчет не может быть пустым!")
+            await update.message.reply_text("❌ Отчет не может быть пустым!")
 
-def download_csv(update: Update, context: CallbackContext):
+async def download_csv(update: Update, context: CallbackContext):
     """Скачать базу в CSV"""
-    all_nicks = get_all_nicks()
+    all_nicks = await get_all_nicks()
     
     if not all_nicks:
-        update.message.reply_text("📭 В базе нет ников.")
+        await update.message.reply_text("📭 В базе нет ников.")
         return
     
     # Создаем CSV
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['Ник', 'Менеджер', 'Дата проверки', 'База данных'])
+    writer.writerow(['Ник', 'Менеджер', 'Дата проверки', 'Источник'])
     
     for nick_info in all_nicks:
         writer.writerow([
             nick_info['nick'],
             nick_info['manager'],
             nick_info['date'],
-            'PostgreSQL' if HAS_POSTGRESQL else 'Локальная'
+            'GitHub'
         ])
     
     bio = io.BytesIO(output.getvalue().encode('utf-8'))
     bio.name = f'nicks_{datetime.datetime.now().strftime("%d-%m-%Y")}.csv'
     
-    update.message.reply_document(
+    await update.message.reply_document(
         document=bio,
-        caption=f"📊 База ников\n✅ Записей: {len(all_nicks)}\n💾 {'PostgreSQL' if HAS_POSTGRESQL else 'Локальные файлы'}"
+        caption=f"📊 База ников с GitHub\n✅ Записей: {len(all_nicks)}\n📁 Сохранено в: {NICKS_FILE_PATH}"
     )
 
-def main():
+async def main():
+    """Основная функция"""
     print("=" * 60)
     print(f"👑 Админ ID: {ADMIN_ID}")
+    print(f"👤 Владелец репозитория: {GITHUB_REPO_OWNER}")
+    print(f"📁 Репозиторий: {GITHUB_REPO_NAME}")
+    print(f"📄 Файл с никами: {NICKS_FILE_PATH}")
     print("=" * 60)
     
-    updater = Updater(
-        TOKEN,
-        use_context=True,
-        workers=1,
-        request_kwargs={'read_timeout': 30, 'connect_timeout': 30}
-    )
+    # Проверяем подключение к GitHub
+    if GITHUB_TOKEN:
+        print("✅ GitHub токен настроен")
+        
+        # Проверяем доступ к репозиторию
+        test_nicks = await load_nicks()
+        if isinstance(test_nicks, dict):
+            total = test_nicks.get('total', 0) if "nicks" in test_nicks else 0
+            print(f"📊 Найдено ников в базе: {total}")
+        else:
+            print("📁 Создаем новую базу на GitHub")
+    else:
+        print("❌ GITHUB_TOKEN не настроен!")
     
-    dp = updater.dispatcher
+    # Создаем приложение
+    application = Application.builder().token(TOKEN).build()
     
-    dp.add_handler(CommandHandler('start', start))
-    dp.add_handler(MessageHandler(Filters.text, handle_text))
+    # Добавляем обработчики
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT, handle_text))
     
-    updater.start_polling(
-        poll_interval=1.0,
-        timeout=30,
-        drop_pending_updates=True,
-        bootstrap_retries=0
-    )
-    
+    # Запускаем бота
     print("✅ Бот запущен!")
     print("📲 /start для начала работы")
     print("=" * 60)
     
-    updater.idle()
+    await application.run_polling()
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())
