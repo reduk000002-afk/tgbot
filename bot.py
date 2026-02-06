@@ -37,7 +37,7 @@ if os.getenv("GITHUB_REPO_NAME"):
 # Логин: 4 заглавные буквы + 3 цифры (без последовательностей)
 # Пароль: 1 заглавная, 1 маленькая, 1 заглавная, 5 цифр (без последовательностей)
 VALID_CREDENTIALS = {
-    # Логин: пароль
+    # Логин: пароль (логины В ВЕРХНЕМ РЕГИСТРЕ для удобства)
     "XKPM738": "BaR42917",
     "QZTF194": "DiM58306",
     "LHRC562": "FoN79124",
@@ -140,6 +140,9 @@ VALID_CREDENTIALS = {
     "test": "12345"  # админский логин для теста
 }
 
+# Создаем версию для поиска без учета регистра
+VALID_CREDENTIALS_NORMALIZED = {k.upper(): v for k, v in VALID_CREDENTIALS.items()}
+
 # Твой Telegram ID
 ADMIN_ID = "7333863565"
 
@@ -169,15 +172,18 @@ _login_to_user = {}  # login -> telegram_id (для связи аккаунто�
 
 async def save_user(telegram_id: str, login: str, name: str) -> bool:
     """Сохранить пользователя в GitHub"""
+    # Нормализуем логин (в верхний регистр)
+    login_normalized = login.upper()
+    
     if not GITHUB_TOKEN:
         logger.error("❌ GITHUB_TOKEN не настроен! Сохраняю локально")
         _local_users[telegram_id] = {
-            'login': login,
+            'login': login_normalized,  # Сохраняем нормализованный логин
             'name': name,
             'auth_date': datetime.datetime.now().isoformat(),
             'telegram_id': telegram_id
         }
-        _login_to_user[login] = telegram_id
+        _login_to_user[login_normalized] = telegram_id
         return True
     
     # Загружаем текущих пользователей
@@ -198,7 +204,7 @@ async def save_user(telegram_id: str, login: str, name: str) -> bool:
     
     # Добавляем пользователя
     users_data["users"][telegram_id] = {
-        'login': login,
+        'login': login_normalized,  # Сохраняем нормализованный логин
         'name': name,
         'auth_date': datetime.datetime.now().isoformat(),
         'telegram_id': telegram_id,
@@ -206,19 +212,19 @@ async def save_user(telegram_id: str, login: str, name: str) -> bool:
     }
     
     # Связываем логин с пользователем (для доступа с разных телеграм аккаунтов)
-    if login not in users_data["logins"]:
-        users_data["logins"][login] = {
+    if login_normalized not in users_data["logins"]:
+        users_data["logins"][login_normalized] = {
             'telegram_ids': [],
             'main_name': name,
             'last_used': datetime.datetime.now().isoformat()
         }
     
     # Добавляем telegram_id в список, если его там еще нет
-    if telegram_id not in users_data["logins"][login]['telegram_ids']:
-        users_data["logins"][login]['telegram_ids'].append(telegram_id)
+    if telegram_id not in users_data["logins"][login_normalized]['telegram_ids']:
+        users_data["logins"][login_normalized]['telegram_ids'].append(telegram_id)
     
-    users_data["logins"][login]['last_used'] = datetime.datetime.now().isoformat()
-    users_data["logins"][login]['main_name'] = name  # Обновляем имя на последнее
+    users_data["logins"][login_normalized]['last_used'] = datetime.datetime.now().isoformat()
+    users_data["logins"][login_normalized]['main_name'] = name  # Обновляем имя на последнее
     
     users_data["total"] = len(users_data["users"])
     users_data["updated"] = datetime.datetime.now().isoformat()
@@ -237,7 +243,7 @@ async def save_user(telegram_id: str, login: str, name: str) -> bool:
                     sha = file_info.get('sha')
         
         payload = {
-            "message": f"Add/update user {name} (login: {login})",
+            "message": f"Add/update user {name} (login: {login_normalized})",
             "content": content_base64,
             "branch": "main"
         }
@@ -250,14 +256,14 @@ async def save_user(telegram_id: str, login: str, name: str) -> bool:
                     logger.info(f"✅ Пользователь {name} сохранен на GitHub")
                     # Обновляем локальный кэш
                     _local_users[telegram_id] = users_data["users"][telegram_id]
-                    _login_to_user[login] = telegram_id
+                    _login_to_user[login_normalized] = telegram_id
                     return True
     except Exception as e:
         logger.error(f"❌ Ошибка сохранения на GitHub: {e}")
     
     # Если не удалось сохранить на GitHub, сохраняем локально
     _local_users[telegram_id] = users_data["users"][telegram_id]
-    _login_to_user[login] = telegram_id
+    _login_to_user[login_normalized] = telegram_id
     return True
 
 async def get_user(telegram_id: str) -> Optional[Dict]:
@@ -294,6 +300,9 @@ async def get_user(telegram_id: str) -> Optional[Dict]:
 
 async def get_user_by_login(login: str) -> Optional[Dict]:
     """Получить пользователя по логину (для истории с разных аккаунтов)"""
+    # Нормализуем логин для поиска
+    login_normalized = login.upper()
+    
     if not GITHUB_TOKEN:
         return None
     
@@ -308,14 +317,14 @@ async def get_user_by_login(login: str) -> Optional[Dict]:
                     content = base64.b64decode(data['content']).decode('utf-8')
                     users_data = json.loads(content)
                     
-                    # Ищем пользователя по логину
+                    # Ищем пользователя по логину (без учета регистра)
                     for user_id, user_data in users_data.get("users", {}).items():
-                        if user_data.get('login') == login:
+                        if user_data.get('login', '').upper() == login_normalized:
                             return user_data
                     
-                    # Проверяем связку логинов
-                    if login in users_data.get("logins", {}):
-                        login_info = users_data["logins"][login]
+                    # Проверяем связку логинов (без учета регистра)
+                    if login_normalized in users_data.get("logins", {}):
+                        login_info = users_data["logins"][login_normalized]
                         if login_info.get('telegram_ids'):
                             # Берем последнего пользователя из списка
                             last_id = login_info['telegram_ids'][-1]
@@ -328,6 +337,9 @@ async def get_user_by_login(login: str) -> Optional[Dict]:
 
 async def get_user_nicks(login: str) -> List[Dict]:
     """Получить все ники пользователя по логину"""
+    # Нормализуем логин для поиска
+    login_normalized = login.upper()
+    
     if not GITHUB_TOKEN:
         return []
     
@@ -344,7 +356,8 @@ async def get_user_nicks(login: str) -> List[Dict]:
                     
                     user_nicks = []
                     for nick, info in nicks_data.get("nicks", {}).items():
-                        if info.get('user_login') == login:
+                        # Сравниваем логины без учета регистра
+                        if info.get('user_login', '').upper() == login_normalized:
                             date = info.get('check_date', '')[:10]
                             user_nicks.append({
                                 'nick': nick,
@@ -362,12 +375,15 @@ async def get_user_nicks(login: str) -> List[Dict]:
 
 async def save_nick(nick: str, manager_id: str, manager_name: str, login: str) -> bool:
     """Сохранить ник в GitHub"""
+    # Нормализуем логин
+    login_normalized = login.upper()
+    
     if not GITHUB_TOKEN:
         logger.error("❌ GITHUB_TOKEN не настроен! Сохраняю локально")
         _local_nicks[nick] = {
             'user_id': manager_id,
             'user_name': manager_name,
-            'user_login': login,
+            'user_login': login_normalized,
             'check_date': datetime.datetime.now().isoformat()
         }
         return True
@@ -395,7 +411,7 @@ async def save_nick(nick: str, manager_id: str, manager_name: str, login: str) -
     nicks_data["nicks"][nick] = {
         'user_id': manager_id,
         'user_name': manager_name,
-        'user_login': login,
+        'user_login': login_normalized,
         'check_date': datetime.datetime.now().isoformat()
     }
     nicks_data["total"] = len(nicks_data["nicks"])
@@ -415,7 +431,7 @@ async def save_nick(nick: str, manager_id: str, manager_name: str, login: str) -
                     sha = file_info.get('sha')
         
         payload = {
-            "message": f"Add nick {nick} by {login}",
+            "message": f"Add nick {nick} by {login_normalized}",
             "content": content_base64,
             "branch": "main"
         }
@@ -425,7 +441,7 @@ async def save_nick(nick: str, manager_id: str, manager_name: str, login: str) -
         async with aiohttp.ClientSession() as session:
             async with session.put(url, headers=headers, json=payload) as response:
                 if response.status in [200, 201]:
-                    logger.info(f"✅ Ник {nick} сохранен на GitHub пользователем {login}")
+                    logger.info(f"✅ Ник {nick} сохранен на GitHub пользователем {login_normalized}")
                     # Обновляем локальный кэш
                     _local_nicks[nick] = nicks_data["nicks"][nick]
                     return True
@@ -565,16 +581,18 @@ async def handle_text(update: Update, context: CallbackContext):
     # Авторизация
     if 'auth_step' in context.user_data:
         if context.user_data['auth_step'] == 'login':
-            if text in VALID_CREDENTIALS:
+            # Проверяем логин без учета регистра
+            login_upper = text.upper()
+            if login_upper in VALID_CREDENTIALS_NORMALIZED:
                 context.user_data['auth_step'] = 'password'
-                context.user_data['login'] = text
-                await update.message.reply_text(f"Логин принят: {text}\nВведите пароль:")
+                context.user_data['login'] = login_upper  # Сохраняем в верхнем регистре
+                await update.message.reply_text(f"Логин принят: {login_upper}\nВведите пароль:")
             else:
                 await update.message.reply_text("❌ Неверный логин. Введите логин:")
         
         elif context.user_data['auth_step'] == 'password':
-            login = context.user_data['login']
-            expected_password = VALID_CREDENTIALS.get(login)
+            login = context.user_data['login']  # Уже в верхнем регистре
+            expected_password = VALID_CREDENTIALS_NORMALIZED.get(login)
             
             if text == expected_password:
                 user_name = update.effective_user.full_name
@@ -708,11 +726,12 @@ async def handle_text(update: Update, context: CallbackContext):
             existing = await get_nick(nick)
             
             if existing:
-                if existing.get('user_login') == user_login:
+                # Сравниваем логины без учета регистра
+                existing_login = existing.get('user_login', '').upper()
+                if existing_login == user_login.upper():
                     await update.message.reply_text(f"❌ Ник '{nick}' уже проверен вами.")
                 else:
-                    existing_login = existing.get('user_login', 'Неизвестно')
-                    await update.message.reply_text(f"❌ Ник '{nick}' занят (логин: {existing_login}).")
+                    await update.message.reply_text(f"❌ Ник '{nick}' занят (логин: {existing.get('user_login', 'Неизвестно')}).")
             else:
                 # Сохраняем новый ник
                 if await save_nick(nick, user_id, user_name, user_login):
@@ -780,6 +799,10 @@ def main():
     
     print("🤖 Telegram бот запущен и готов к работе")
     print("📲 Используйте /start в Telegram для начала работы")
+    print("📋 Доступные логины (первые 10):")
+    for i, login in enumerate(list(VALID_CREDENTIALS_NORMALIZED.keys())[:10], 1):
+        print(f"  {i}. {login}")
+    print("... и еще 90 логинов")
     
     # Запускаем бота
     application.run_polling()
