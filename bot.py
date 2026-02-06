@@ -6,11 +6,8 @@ import csv
 import io
 import base64
 import asyncio
-import threading
 from typing import Dict, List, Optional
 import aiohttp
-import socketserver
-from http.server import BaseHTTPRequestHandler
 
 # Настройка логирования
 logging.basicConfig(
@@ -39,28 +36,6 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/contents"
 NICKS_FILE_PATH = "nicks_database.json"
 USERS_FILE_PATH = "users_database.json"
-
-# ========== ПРОСТОЙ HTTP СЕРВЕР ДЛЯ HEALTHCHECK ==========
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == '/health':
-            self.send_response(200)
-            self.send_header('Content-type', 'text/plain')
-            self.end_headers()
-            self.wfile.write(b'OK')
-        else:
-            self.send_response(404)
-            self.end_headers()
-    
-    def log_message(self, format, *args):
-        pass  # Отключаем логи
-
-def run_health_server():
-    """Запуск простого HTTP сервера для healthcheck"""
-    port = int(os.getenv('PORT', 8080))
-    with socketserver.TCPServer(("", port), HealthHandler) as httpd:
-        logger.info(f"✅ Health check сервер запущен на порту {port}")
-        httpd.serve_forever()
 
 # ========== GITHUB ФУНКЦИИ ==========
 async def get_github_file_content(filename: str) -> Optional[Dict]:
@@ -137,10 +112,6 @@ async def save_to_github_file(filename: str, data: Dict) -> bool:
             async with session.put(url, headers=headers, json=payload) as response:
                 if response.status in [200, 201]:
                     logger.info(f"✅ Файл {filename} сохранен на GitHub")
-                    
-                    # Показываем ссылку
-                    file_url = f"https://github.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/blob/main/{filename}"
-                    print(f"📁 Файл: {file_url}")
                     return True
                 else:
                     error_text = await response.text()
@@ -151,20 +122,41 @@ async def save_to_github_file(filename: str, data: Dict) -> bool:
             logger.error(f"❌ Ошибка сохранения файла {filename}: {e}")
             return False
 
-# ========== ФУНКЦИИ ДЛЯ РАБОТЫ С ДАННЫМИ ==========
+# ========== КЭШ ДЛЯ УСКОРЕНИЯ ==========
+_users_cache = None
+_nicks_cache = None
+
 async def load_nicks() -> Dict:
     """Загрузить ники из GitHub"""
+    global _nicks_cache
+    if _nicks_cache is not None:
+        return _nicks_cache
+    
     nicks = await get_github_file_content(NICKS_FILE_PATH)
     if nicks is None:
-        return {}
+        nicks = {"nicks": {}, "total": 0, "updated": ""}
+    
+    _nicks_cache = nicks
     return nicks
 
 async def load_users() -> Dict:
     """Загрузить пользователей из GitHub"""
+    global _users_cache
+    if _users_cache is not None:
+        return _users_cache
+    
     users = await get_github_file_content(USERS_FILE_PATH)
     if users is None:
-        return {}
+        users = {"users": {}, "total": 0, "updated": ""}
+    
+    _users_cache = users
     return users
+
+def clear_cache():
+    """Очистить кэш"""
+    global _users_cache, _nicks_cache
+    _users_cache = None
+    _nicks_cache = None
 
 async def save_nick(nick: str, manager_id: str, manager_name: str) -> bool:
     """Сохранить ник в базу"""
@@ -191,7 +183,10 @@ async def save_nick(nick: str, manager_id: str, manager_name: str) -> bool:
     nicks["updated"] = datetime.datetime.now().isoformat()
     
     # Сохраняем на GitHub
-    return await save_to_github_file(NICKS_FILE_PATH, nicks)
+    success = await save_to_github_file(NICKS_FILE_PATH, nicks)
+    if success:
+        clear_cache()  # Очищаем кэш после сохранения
+    return success
 
 async def get_nick(nick: str) -> Optional[Dict]:
     """Получить информацию о нике"""
@@ -244,7 +239,11 @@ async def save_user(telegram_id: str, login: str, name: str) -> bool:
     users["updated"] = datetime.datetime.now().isoformat()
     
     # Сохраняем на GitHub
-    return await save_to_github_file(USERS_FILE_PATH, users)
+    success = await save_to_github_file(USERS_FILE_PATH, users)
+    if success:
+        clear_cache()  # Очищаем кэш после сохранения
+        logger.info(f"✅ Пользователь сохранен: {name} (ID: {telegram_id})")
+    return success
 
 async def get_user(telegram_id: str) -> Optional[Dict]:
     """Получить пользователя"""
@@ -282,8 +281,11 @@ async def start(update: Update, context: CallbackContext):
     """Обработчик команды /start"""
     user_id = str(update.effective_user.id)
     
+    # Проверяем есть ли пользователь в базе
     user_data = await get_user(user_id)
+    
     if user_data:
+        # Пользователь уже авторизован
         if user_id == ADMIN_ID:
             await update.message.reply_text(
                 f"✅ Добро пожаловать, Администратор!\n"
@@ -296,6 +298,7 @@ async def start(update: Update, context: CallbackContext):
                 reply_markup=get_user_menu()
             )
     else:
+        # Нужна авторизация
         context.user_data['auth_step'] = 'login'
         await update.message.reply_text("Введите логин:")
 
@@ -304,8 +307,12 @@ async def handle_text(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
     text = update.message.text
     
+    print(f"DEBUG: Получено сообщение от {user_id}: {text}")
+    
     # Авторизация
     if 'auth_step' in context.user_data:
+        print(f"DEBUG: Шаг авторизации: {context.user_data['auth_step']}")
+        
         if context.user_data['auth_step'] == 'login':
             if text == VALID_LOGIN:
                 context.user_data['auth_step'] = 'password'
@@ -319,9 +326,17 @@ async def handle_text(update: Update, context: CallbackContext):
                 user_name = update.effective_user.full_name
                 login = context.user_data['login']
                 
+                print(f"DEBUG: Сохраняем пользователя {user_name} (ID: {user_id})")
+                
                 # Сохраняем пользователя
                 success = await save_user(user_id, login, user_name)
                 
+                if success:
+                    print(f"DEBUG: Пользователь успешно сохранен")
+                else:
+                    print(f"DEBUG: Ошибка сохранения пользователя")
+                
+                # Очищаем данные авторизации
                 context.user_data.clear()
                 
                 if user_id == ADMIN_ID:
@@ -340,11 +355,15 @@ async def handle_text(update: Update, context: CallbackContext):
                 context.user_data.clear()
         return
     
-    # Проверка авторизации
+    # Проверяем авторизацию пользователя
     user_data = await get_user(user_id)
+    
     if not user_data:
+        print(f"DEBUG: Пользователь {user_id} не найден в базе")
         await update.message.reply_text("❌ Требуется авторизация. /start")
         return
+    
+    print(f"DEBUG: Пользователь найден: {user_data['name']}")
     
     current_menu = get_main_menu() if user_id == ADMIN_ID else get_user_menu()
     
@@ -400,6 +419,8 @@ async def handle_text(update: Update, context: CallbackContext):
             await update.message.reply_text("❌ Только для администратора")
     
     elif text == "❌ Выход":
+        # Очищаем кэш при выходе
+        clear_cache()
         await update.message.reply_text(
             "👋 Вы вышли. Используйте /start для входа", 
             reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/start")]], resize_keyboard=True)
@@ -482,12 +503,6 @@ async def download_csv(update: Update, context: CallbackContext):
     )
 
 # ========== ОСНОВНАЯ ФУНКЦИЯ ==========
-def start_health_server_in_thread():
-    """Запуск HTTP сервера в отдельном потоке"""
-    health_thread = threading.Thread(target=run_health_server, daemon=True)
-    health_thread.start()
-    return health_thread
-
 def main():
     """Основная функция запуска бота"""
     print("=" * 60)
@@ -508,16 +523,14 @@ def main():
     if not GITHUB_TOKEN:
         print("⚠️  ПРЕДУПРЕЖДЕНИЕ: GITHUB_TOKEN не настроен!")
         print("   Данные не будут сохраняться на GitHub")
+        print("   Проверь переменные в Railway:")
+        print("   - GITHUB_TOKEN")
+        print("   - GITHUB_REPO_OWNER")
+        print("   - GITHUB_REPO_NAME")
     else:
         print("✅ GitHub токен настроен")
     
-    # Запускаем HTTP сервер для healthcheck
-    health_thread = start_health_server_in_thread()
-    print("✅ Health check сервер запущен")
-    
-    # Даем время серверу запуститься
-    import time
-    time.sleep(2)
+    print("🤖 Запуск Telegram бота...")
     
     # Создаем и настраиваем приложение бота
     application = Application.builder().token(TOKEN).build()
@@ -526,7 +539,7 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     
-    print("🤖 Telegram бот запущен и готов к работе")
+    print("✅ Telegram бот запущен и готов к работе")
     print("📲 Используйте /start в Telegram для начала работы")
     print("=" * 60)
     
