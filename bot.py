@@ -3,6 +3,7 @@ import logging
 import json
 import datetime
 import csv
+import io
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -17,6 +18,9 @@ from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, Callb
 # Логин и пароль
 VALID_LOGIN = "test"
 VALID_PASSWORD = "12345"
+
+# Твой Telegram ID
+ADMIN_ID = "7333863565"  # Только ты можешь скачивать базу
 
 # Файлы для хранения данных
 USERS_FILE = "user.json"
@@ -39,7 +43,6 @@ def save_data(filename, data):
     except:
         pass
 
-# Загружаем данные
 users_db = load_data(USERS_FILE)
 nicks_db = load_data(NICKS_FILE)
 reports_db = load_data(REPORTS_FILE)
@@ -49,16 +52,121 @@ def get_main_menu():
         [KeyboardButton("🔍 Проверка ников")],
         [KeyboardButton("📊 История ников")],
         [KeyboardButton("📝 Отправить отчет")],
+        [KeyboardButton("📥 Скачать базу")],  # Только для тебя
         [KeyboardButton("❌ Выход")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-# ========== ОБРАБОТЧИКИ ==========
+def get_user_menu():
+    keyboard = [
+        [KeyboardButton("🔍 Проверка ников")],
+        [KeyboardButton("📊 История ников")],
+        [KeyboardButton("📝 Отправить отчет")],
+        [KeyboardButton("❌ Выход")]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+# ========== СКАЧАТЬ БАЗУ ==========
+def download_database(update: Update, context: CallbackContext):
+    """Скачать файл со всеми никами (только для админа)"""
+    user_id = str(update.effective_user.id)
+    
+    # Проверяем, это ли ты
+    if user_id != ADMIN_ID:
+        update.message.reply_text(
+            "❌ Эта функция только для администратора",
+            reply_markup=get_user_menu()
+        )
+        return
+    
+    all_nicks = list(nicks_db.items())
+    
+    if not all_nicks:
+        update.message.reply_text("📭 В базе нет ников.", reply_markup=get_main_menu())
+        return
+    
+    # Создаем CSV файл
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['Ник', 'Менеджер', 'ID менеджера', 'Дата проверки'])
+    
+    for nick, info in all_nicks:
+        date = info.get('check_date', '')
+        if date:
+            date_str = date[:10] if len(date) >= 10 else date
+        else:
+            date_str = ''
+        
+        writer.writerow([
+            nick,
+            info.get('user_name', ''),
+            info.get('user_id', ''),
+            date_str
+        ])
+    
+    # Конвертируем в байты
+    bio = io.BytesIO(output.getvalue().encode('utf-8'))
+    bio.name = f'nicks_database_{datetime.datetime.now().strftime("%d-%m-%Y")}.csv'
+    
+    # Отправляем файл
+    update.message.reply_document(
+        document=bio,
+        caption=f"📊 База ников\n✅ Записей: {len(all_nicks)}\n📅 Дата выгрузки: {datetime.datetime.now().strftime('%d.%m.%Y %H:%M')}"
+    )
+
+# ========== КОМАНДА /STATS ==========
+def stats_command(update: Update, context: CallbackContext):
+    """Показать статистику"""
+    user_id = str(update.effective_user.id)
+    
+    if user_id not in users_db:
+        update.message.reply_text("❌ Требуется авторизация.")
+        return
+    
+    all_nicks = list(nicks_db.items())
+    
+    if not all_nicks:
+        update.message.reply_text("📭 В базе нет ников.", reply_markup=get_main_menu())
+        return
+    
+    # Считаем статистику
+    total_nicks = len(all_nicks)
+    
+    # Ники по менеджерам
+    manager_stats = {}
+    for nick, info in all_nicks:
+        manager = info.get('user_name', 'Неизвестно')
+        manager_stats[manager] = manager_stats.get(manager, 0) + 1
+    
+    # Формируем ответ
+    response = "📈 СТАТИСТИКА БАЗЫ\n\n"
+    response += f"🔤 Всего ников: {total_nicks}\n\n"
+    response += "👥 По менеджерам:\n"
+    
+    for manager, count in sorted(manager_stats.items(), key=lambda x: x[1], reverse=True):
+        percentage = (count / total_nicks) * 100
+        response += f"• {manager}: {count} ({percentage:.1f}%)\n"
+    
+    # Последние 5 ников
+    all_nicks.sort(key=lambda x: x[1].get("check_date", ""), reverse=True)
+    response += f"\n🕐 Последние 5 ников:\n"
+    for i, (nick, info) in enumerate(all_nicks[:5], 1):
+        date = info.get('check_date', '')[:10]
+        manager = info.get('user_name', 'Неизвестно')
+        response += f"{i}. {nick} - {manager} ({date})\n"
+    
+    update.message.reply_text(response, reply_markup=get_main_menu())
+
+# ========== ОСНОВНЫЕ ФУНКЦИИ ==========
 def start(update: Update, context: CallbackContext):
     user_id = str(update.effective_user.id)
     
     if user_id in users_db:
-        update.message.reply_text("✅ Вы уже авторизованы!", reply_markup=get_main_menu())
+        # Определяем какое меню показывать
+        if user_id == ADMIN_ID:
+            update.message.reply_text(f"✅ Добро пожаловать, Администратор!", reply_markup=get_main_menu())
+        else:
+            update.message.reply_text(f"✅ Вы уже авторизованы!", reply_markup=get_user_menu())
     else:
         context.user_data['auth_step'] = 'login'
         update.message.reply_text("Введите логин:")
@@ -90,7 +198,12 @@ def handle_text(update: Update, context: CallbackContext):
                 save_data(USERS_FILE, users_db)
                 
                 context.user_data.clear()
-                update.message.reply_text(f"✅ Авторизация успешна! Добро пожаловать, {user_name}!", reply_markup=get_main_menu())
+                
+                # Определяем меню
+                if user_id == ADMIN_ID:
+                    update.message.reply_text(f"✅ Авторизация успешна! Добро пожаловать, Администратор!", reply_markup=get_main_menu())
+                else:
+                    update.message.reply_text(f"✅ Авторизация успешна! Добро пожаловать, {user_name}!", reply_markup=get_user_menu())
             else:
                 update.message.reply_text("❌ Неверный пароль. /start")
                 context.user_data.clear()
@@ -100,6 +213,9 @@ def handle_text(update: Update, context: CallbackContext):
     if user_id not in users_db:
         update.message.reply_text("❌ Требуется авторизация. /start")
         return
+    
+    # Определяем какое меню использовать
+    current_menu = get_main_menu() if user_id == ADMIN_ID else get_user_menu()
     
     # Меню
     if text == "🔍 Проверка ников":
@@ -111,19 +227,22 @@ def handle_text(update: Update, context: CallbackContext):
         all_nicks.sort(key=lambda x: x[1].get("check_date", ""), reverse=True)
         
         if not all_nicks:
-            update.message.reply_text("📭 В базе нет ников.", reply_markup=get_main_menu())
+            update.message.reply_text("📭 В базе нет ников.", reply_markup=current_menu)
         else:
-            response = f"📋 Последние ников: {len(all_nicks)}\n\n"
+            response = f"📋 Последние 10 ников (всего: {len(all_nicks)}):\n\n"
             for i, (nick, info) in enumerate(all_nicks[:10], 1):
                 date = info.get('check_date', '')[:10]
                 manager = info.get('user_name', 'Неизвестно')
                 response += f"{i}. {nick} - {manager} ({date})\n"
             
-            update.message.reply_text(response, reply_markup=get_main_menu())
+            update.message.reply_text(response, reply_markup=current_menu)
     
     elif text == "📝 Отправить отчет":
         update.message.reply_text("Напишите текст отчета:")
         context.user_data['mode'] = 'report'
+    
+    elif text == "📥 Скачать базу":
+        download_database(update, context)
     
     elif text == "❌ Выход":
         if user_id in users_db:
@@ -144,7 +263,8 @@ def handle_text(update: Update, context: CallbackContext):
                 if info["user_id"] == user_id:
                     update.message.reply_text(f"❌ Ник '{nick}' уже проверен вами.")
                 else:
-                    update.message.reply_text(f"❌ Ник '{nick}' занят менеджером {info['user_name']}.")
+                    other_user = info['user_name']
+                    update.message.reply_text(f"❌ Ник '{nick}' занят менеджером {other_user}.")
             else:
                 nicks_db[nick] = {
                     "user_id": user_id,
@@ -153,7 +273,7 @@ def handle_text(update: Update, context: CallbackContext):
                 }
                 save_data(NICKS_FILE, nicks_db)
                 
-                update.message.reply_text(f"✅ Ник '{nick}' свободен и закреплен!")
+                update.message.reply_text(f"✅ Ник '{nick}' свободен и закреплен за вами!")
         
         update.message.reply_text("Введите следующий ник:")
     
@@ -172,7 +292,7 @@ def handle_text(update: Update, context: CallbackContext):
             }
             save_data(REPORTS_FILE, reports_db)
             
-            update.message.reply_text("✅ Отчет отправлен!", reply_markup=get_main_menu())
+            update.message.reply_text("✅ Отчет отправлен!", reply_markup=current_menu)
             context.user_data.pop('mode', None)
         else:
             update.message.reply_text("❌ Отчет не может быть пустым!")
@@ -180,7 +300,14 @@ def handle_text(update: Update, context: CallbackContext):
 def main():
     print("=" * 60)
     print("🚀 БОТ ЗАПУЩЕН")
+    print(f"👑 Админ ID: {ADMIN_ID}")
     print("=" * 60)
+    
+    # Создаем файлы если их нет
+    for file in [USERS_FILE, NICKS_FILE, REPORTS_FILE]:
+        if not os.path.exists(file):
+            with open(file, 'w', encoding='utf-8') as f:
+                json.dump({}, f)
     
     updater = Updater(
         TOKEN,
@@ -192,6 +319,7 @@ def main():
     dp = updater.dispatcher
     
     dp.add_handler(CommandHandler('start', start))
+    dp.add_handler(CommandHandler('stats', stats_command))
     dp.add_handler(MessageHandler(Filters.text, handle_text))
     
     updater.start_polling(
