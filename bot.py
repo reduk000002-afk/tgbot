@@ -9,153 +9,127 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# ========== ДЕТАЛЬНАЯ ДИАГНОСТИКА ==========
+# ========== ПОЛУЧАЕМ ПЕРЕМЕННЫЕ ИЗ ТОГО ЧТО ЕСТЬ ==========
 print("=" * 80)
-print("🔍 ДЕТАЛЬНАЯ ПРОВЕРКА ПЕРЕМЕННЫХ RAILWAY")
+print("🔍 ВСЕ доступные переменные:")
 print("=" * 80)
 
-# Вариант 1: os.environ
-print("📋 Метод 1: os.environ")
-github_token_env = os.environ.get("GITHUB_TOKEN")
-print(f"GITHUB_TOKEN через os.environ: {'✅ ЕСТЬ' if github_token_env else '❌ НЕТ'}")
-
-# Вариант 2: os.getenv
-print("\n📋 Метод 2: os.getenv")
-github_token_getenv = os.getenv("GITHUB_TOKEN")
-print(f"GITHUB_TOKEN через os.getenv: {'✅ ЕСТЬ' if github_token_getenv else '❌ НЕТ'}")
-
-# Вариант 3: Все переменные
-print("\n📋 Метод 3: Все переменные с 'GITHUB' или 'TOKEN'")
+# Выводим ВСЕ переменные для диагностики
+all_vars = {}
 for key, value in os.environ.items():
-    if "GITHUB" in key or "TOKEN" in key or "REPO" in key:
-        masked_value = "***СКРЫТО***" if "TOKEN" in key else value
-        print(f"  {key}: {masked_value}")
-
-# Вариант 4: Все переменные вообще
-print("\n📋 Метод 4: Все доступные переменные")
-all_vars = list(os.environ.keys())
-print(f"Всего переменных: {len(all_vars)}")
-print(f"Первые 10: {all_vars[:10]}")
+    all_vars[key] = value
+    print(f"{key}: {'***СКРЫТО***' if 'TOKEN' in key or 'KEY' in key or 'SECRET' in key else value}")
 
 print("=" * 80)
 
-# Получаем значения
-TOKEN = os.environ.get("BOT_TOKEN")
-GITHUB_TOKEN = github_token_env or github_token_getenv
-GITHUB_REPO_OWNER = os.environ.get("GITHUB_REPO_OWNER", "reduk000002-afk")
-GITHUB_REPO_NAME = os.environ.get("GITHUB_REPO_NAME", "tgbot")
+# Пробуем получить токен разными способами
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-print(f"✅ Итоговые значения:")
-print(f"  TOKEN: {'✅ ЕСТЬ' if TOKEN else '❌ НЕТ'}")
-print(f"  GITHUB_TOKEN: {'✅ ЕСТЬ' if GITHUB_TOKEN else '❌ НЕТ'}")
-if GITHUB_TOKEN:
-    print(f"     Начинается с: {GITHUB_TOKEN[:10]}...")
-    print(f"     Длина: {len(GITHUB_TOKEN)}")
-print(f"  GITHUB_REPO_OWNER: {GITHUB_REPO_OWNER}")
-print(f"  GITHUB_REPO_NAME: {GITHUB_REPO_NAME}")
+# GitHub токен - пробуем разные варианты
+GITHUB_TOKEN = None
+possible_token_keys = ["GITHUB_TOKEN", "github_token", "GITHUBTOKEN", "GIT_TOKEN"]
+
+for key in possible_token_keys:
+    token = os.environ.get(key)
+    if token and token.startswith("ghp_"):
+        GITHUB_TOKEN = token
+        print(f"✅ Нашел GitHub токен в переменной: {key}")
+        break
+
+# Репозиторий - берем из системных Railway переменных
+GITHUB_REPO_OWNER = os.environ.get("RAILWAY_GIT_REPO_OWNER", "reduk000002-afk")
+GITHUB_REPO_NAME = os.environ.get("RAILWAY_GIT_REPO_NAME", "tgbot")
+
+print(f"📊 Итоговая конфигурация:")
+print(f"  BOT_TOKEN: {'✅' if BOT_TOKEN else '❌'}")
+print(f"  GITHUB_TOKEN: {'✅' if GITHUB_TOKEN else '❌'}")
+print(f"  REPO_OWNER: {GITHUB_REPO_OWNER}")
+print(f"  REPO_NAME: {GITHUB_REPO_NAME}")
 print("=" * 80)
 
 # ========== КОМАНДЫ БОТА ==========
 async def start(update: Update, context: CallbackContext):
     """Команда /start"""
-    user = update.effective_user
-    
-    # Формируем детальный статус
-    token_status = "✅ Настроен" if GITHUB_TOKEN else "❌ Не настроен"
-    token_details = ""
-    
-    if GITHUB_TOKEN:
-        token_details = f"\n🔐 Токен: {GITHUB_TOKEN[:10]}... ({len(GITHUB_TOKEN)} символов)"
-    
-    message = (
-        f"👋 Привет, {user.first_name}!\n\n"
+    await update.message.reply_text(
         f"🤖 Бот для проверки ников\n\n"
+        f"✅ BOT_TOKEN: {'✅' if BOT_TOKEN else '❌'}\n"
+        f"✅ GITHUB_TOKEN: {'✅' if GITHUB_TOKEN else '❌'}\n"
+        f"✅ Репозиторий: {GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}\n\n"
         f"📋 Команды:\n"
-        f"/check [ник] - проверить ник\n"
-        f"/debug - отладочная информация\n"
-        f"/vars - показать переменные\n\n"
-        f"🔧 Конфигурация:\n"
-        f"• GitHub: {token_status}{token_details}\n"
-        f"• Репозиторий: {GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}"
+        f"/test - тест GitHub\n"
+        f"/config - конфигурация"
     )
-    await update.message.reply_text(message)
 
-async def check(update: Update, context: CallbackContext):
-    """Команда /check"""
-    if not context.args:
-        await update.message.reply_text("❌ Укажите ник: /check example123")
-        return
-    
-    nick = context.args[0]
-    await update.message.reply_text(f"🔍 Проверяю '{nick}'...")
-    
+async def test(update: Update, context: CallbackContext):
+    """Тест GitHub"""
     if not GITHUB_TOKEN:
         await update.message.reply_text(
-            "❌ GitHub токен не настроен!\n\n"
-            "ℹ️ Для настройки:\n"
-            "1. Зайди в Railway → Variables\n"
-            "2. Добавь переменную GITHUB_TOKEN\n"
-            "3. Значение: ghp_твой_токен\n"
-            "4. Сделай Manual Deploy"
+            "❌ GitHub токен не найден!\n\n"
+            "ℹ️ Railway не передает переменную GITHUB_TOKEN.\n"
+            "Попробуй:\n"
+            "1. Переименовать переменную в Railway\n"
+            "2. Использовать другой способ хранения токена"
         )
-    else:
-        await update.message.reply_text(f"✅ GitHub токен найден! ({len(GITHUB_TOKEN)} символов)")
+        return
+    
+    import aiohttp
+    try:
+        url = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}"
+        headers = {'Authorization': f'token {GITHUB_TOKEN}'}
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    await update.message.reply_text(f"✅ GitHub работает! Статус: {response.status}")
+                else:
+                    error = await response.text()
+                    await update.message.reply_text(f"❌ GitHub ошибка: {response.status}\n{error[:200]}")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {str(e)}")
 
-async def debug(update: Update, context: CallbackContext):
-    """Команда /debug"""
-    await update.message.reply_text(
-        f"🔧 Отладочная информация:\n\n"
-        f"📊 Переменные окружения:\n"
-        f"• BOT_TOKEN: {'✅' if TOKEN else '❌'}\n"
-        f"• GITHUB_TOKEN: {'✅' if GITHUB_TOKEN else '❌'}\n"
-        f"• Всего переменных: {len(os.environ)}\n\n"
-        f"📝 Проверь Railway:\n"
-        f"1. Зайди в Railway → Variables\n"
-        f"2. Ищи GITHUB_TOKEN\n"
-        f"3. Если нет - добавь\n"
-        f"4. Сделай Manual Deploy"
-    )
-
-async def vars_command(update: Update, context: CallbackContext):
-    """Команда /vars - показать все переменные"""
+async def config(update: Update, context: CallbackContext):
+    """Показать конфигурацию"""
+    # Формируем список всех переменных
     vars_list = []
     for key in sorted(os.environ.keys()):
-        if "TOKEN" in key:
+        value = os.environ[key]
+        if any(x in key for x in ["TOKEN", "KEY", "SECRET", "PASS"]):
             value = "***СКРЫТО***"
-        else:
-            value = os.environ[key]
         vars_list.append(f"{key}: {value}")
     
-    # Разбиваем на части если слишком много
-    message = "📋 Доступные переменные:\n\n" + "\n".join(vars_list[:20])
+    message = (
+        f"📋 Конфигурация:\n\n"
+        f"• BOT_TOKEN: {'✅' if BOT_TOKEN else '❌'}\n"
+        f"• GITHUB_TOKEN: {'✅' if GITHUB_TOKEN else '❌'}\n"
+        f"• REPO_OWNER: {GITHUB_REPO_OWNER}\n"
+        f"• REPO_NAME: {GITHUB_REPO_NAME}\n\n"
+        f"🔧 Переменные ({len(vars_list)}):\n"
+    )
     
-    if len(vars_list) > 20:
-        message += f"\n\n... и еще {len(vars_list) - 20} переменных"
+    # Добавляем первые 15 переменных
+    for var in vars_list[:15]:
+        message += f"  {var}\n"
+    
+    if len(vars_list) > 15:
+        message += f"  ... и еще {len(vars_list) - 15} переменных"
     
     await update.message.reply_text(message)
 
 # ========== ЗАПУСК ==========
 def main():
     """Запуск бота"""
-    if not TOKEN:
-        print("❌ ОШИБКА: BOT_TOKEN не найден!")
+    if not BOT_TOKEN:
+        print("❌ BOT_TOKEN не найден!")
         return
     
     print("🤖 Запускаю бота...")
     
-    # Создаем приложение
-    app = Application.builder().token(TOKEN).build()
-    
-    # Добавляем команды
+    app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("check", check))
-    app.add_handler(CommandHandler("debug", debug))
-    app.add_handler(CommandHandler("vars", vars_command))
+    app.add_handler(CommandHandler("test", test))
+    app.add_handler(CommandHandler("config", config))
     
     print("✅ Бот запущен!")
-    print("📲 Напиши /debug в Telegram")
-    
-    # Запускаем
     app.run_polling()
 
 if __name__ == "__main__":
