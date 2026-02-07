@@ -1,9 +1,5 @@
 import os
 import logging
-import json
-import datetime
-import base64
-import aiohttp
 from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackContext
 
@@ -12,117 +8,74 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
-logger = logging.getLogger(__name__)
 
-# ========== ПРОВЕРКА ПЕРЕМЕННЫХ ==========
+# ========== ДЕТАЛЬНАЯ ДИАГНОСТИКА ==========
 print("=" * 80)
-print("🔍 ПРОВЕРКА ПЕРЕМЕННЫХ ОКРУЖЕНИЯ В RAILWAY")
+print("🔍 ДЕТАЛЬНАЯ ПРОВЕРКА ПЕРЕМЕННЫХ RAILWAY")
 print("=" * 80)
 
-# Читаем ВСЕ переменные
-all_vars = dict(os.environ)
+# Вариант 1: os.environ
+print("📋 Метод 1: os.environ")
+github_token_env = os.environ.get("GITHUB_TOKEN")
+print(f"GITHUB_TOKEN через os.environ: {'✅ ЕСТЬ' if github_token_env else '❌ НЕТ'}")
+
+# Вариант 2: os.getenv
+print("\n📋 Метод 2: os.getenv")
+github_token_getenv = os.getenv("GITHUB_TOKEN")
+print(f"GITHUB_TOKEN через os.getenv: {'✅ ЕСТЬ' if github_token_getenv else '❌ НЕТ'}")
+
+# Вариант 3: Все переменные
+print("\n📋 Метод 3: Все переменные с 'GITHUB' или 'TOKEN'")
+for key, value in os.environ.items():
+    if "GITHUB" in key or "TOKEN" in key or "REPO" in key:
+        masked_value = "***СКРЫТО***" if "TOKEN" in key else value
+        print(f"  {key}: {masked_value}")
+
+# Вариант 4: Все переменные вообще
+print("\n📋 Метод 4: Все доступные переменные")
+all_vars = list(os.environ.keys())
 print(f"Всего переменных: {len(all_vars)}")
+print(f"Первые 10: {all_vars[:10]}")
 
-# Ищем наши переменные
-TOKEN = None
-GITHUB_TOKEN = None
-GITHUB_REPO_OWNER = None
-GITHUB_REPO_NAME = None
-
-for key, value in all_vars.items():
-    if "TOKEN" in key or "GITHUB" in key or "REPO" in key:
-        print(f"{key}: {'***СКРЫТО***' if 'TOKEN' in key else value}")
-
-print("-" * 80)
+print("=" * 80)
 
 # Получаем значения
 TOKEN = os.environ.get("BOT_TOKEN")
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+GITHUB_TOKEN = github_token_env or github_token_getenv
 GITHUB_REPO_OWNER = os.environ.get("GITHUB_REPO_OWNER", "reduk000002-afk")
 GITHUB_REPO_NAME = os.environ.get("GITHUB_REPO_NAME", "tgbot")
 
-print(f"✅ BOT_TOKEN: {'Найден' if TOKEN else '❌ НЕ НАЙДЕН'}")
-print(f"✅ GITHUB_TOKEN: {'Найден' if GITHUB_TOKEN else '❌ НЕ НАЙДЕН'}")
+print(f"✅ Итоговые значения:")
+print(f"  TOKEN: {'✅ ЕСТЬ' if TOKEN else '❌ НЕТ'}")
+print(f"  GITHUB_TOKEN: {'✅ ЕСТЬ' if GITHUB_TOKEN else '❌ НЕТ'}")
 if GITHUB_TOKEN:
-    print(f"   Начинается с: {GITHUB_TOKEN[:10]}...")
-print(f"✅ GITHUB_REPO_OWNER: {GITHUB_REPO_OWNER}")
-print(f"✅ GITHUB_REPO_NAME: {GITHUB_REPO_NAME}")
+    print(f"     Начинается с: {GITHUB_TOKEN[:10]}...")
+    print(f"     Длина: {len(GITHUB_TOKEN)}")
+print(f"  GITHUB_REPO_OWNER: {GITHUB_REPO_OWNER}")
+print(f"  GITHUB_REPO_NAME: {GITHUB_REPO_NAME}")
 print("=" * 80)
-
-# ========== ФУНКЦИИ ==========
-async def save_nick_to_github(nick: str, user_id: str, user_name: str) -> str:
-    """Сохранить ник на GitHub, возвращает результат"""
-    if not GITHUB_TOKEN:
-        return "❌ GitHub токен не настроен в Railway"
-    
-    try:
-        url = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/contents/nicks_database.json"
-        headers = {'Authorization': f'token {GITHUB_TOKEN}'}
-        
-        # Получаем текущий файл
-        nicks_data = {"nicks": {}, "updated": datetime.datetime.now().isoformat()}
-        sha = None
-        
-        async with aiohttp.ClientSession() as session:
-            # Пробуем получить существующий файл
-            try:
-                async with session.get(url, headers=headers) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        content = base64.b64decode(data['content']).decode('utf-8')
-                        nicks_data = json.loads(content)
-                        sha = data.get('sha')
-                        logger.info(f"Файл загружен, {len(nicks_data.get('nicks', {}))} ников")
-            except Exception as e:
-                logger.info(f"Новый файл: {e}")
-        
-        # Проверяем уникальность
-        if nick in nicks_data.get("nicks", {}):
-            return f"❌ Ник '{nick}' уже занят"
-        
-        # Добавляем ник
-        nicks_data["nicks"][nick] = {
-            'user_id': user_id,
-            'user_name': user_name,
-            'date': datetime.datetime.now().isoformat()
-        }
-        
-        # Сохраняем
-        content = json.dumps(nicks_data, ensure_ascii=False, indent=2)
-        content_base64 = base64.b64encode(content.encode('utf-8')).decode('utf-8')
-        
-        payload = {
-            "message": f"Добавлен ник {nick}",
-            "content": content_base64,
-            "branch": "main"
-        }
-        if sha:
-            payload["sha"] = sha
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.put(url, headers=headers, json=payload) as response:
-                if response.status in [200, 201]:
-                    file_url = f"https://github.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/blob/main/nicks_database.json"
-                    return f"✅ Ник '{nick}' сохранен!\n📁 Файл: {file_url}"
-                else:
-                    error_text = await response.text()
-                    return f"❌ Ошибка GitHub: {response.status}\n{error_text[:200]}"
-                    
-    except Exception as e:
-        return f"❌ Ошибка: {str(e)}"
 
 # ========== КОМАНДЫ БОТА ==========
 async def start(update: Update, context: CallbackContext):
     """Команда /start"""
     user = update.effective_user
+    
+    # Формируем детальный статус
+    token_status = "✅ Настроен" if GITHUB_TOKEN else "❌ Не настроен"
+    token_details = ""
+    
+    if GITHUB_TOKEN:
+        token_details = f"\n🔐 Токен: {GITHUB_TOKEN[:10]}... ({len(GITHUB_TOKEN)} символов)"
+    
     message = (
         f"👋 Привет, {user.first_name}!\n\n"
         f"🤖 Бот для проверки ников\n\n"
         f"📋 Команды:\n"
-        f"/check [ник] - проверить и сохранить ник\n"
-        f"/status - статус бота\n\n"
+        f"/check [ник] - проверить ник\n"
+        f"/debug - отладочная информация\n"
+        f"/vars - показать переменные\n\n"
         f"🔧 Конфигурация:\n"
-        f"• GitHub: {'✅ Настроен' if GITHUB_TOKEN else '❌ Не настроен'}\n"
+        f"• GitHub: {token_status}{token_details}\n"
         f"• Репозиторий: {GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}"
     )
     await update.message.reply_text(message)
@@ -133,34 +86,52 @@ async def check(update: Update, context: CallbackContext):
         await update.message.reply_text("❌ Укажите ник: /check example123")
         return
     
-    nick = context.args[0].lower().strip()
-    user = update.effective_user
-    
-    if not nick:
-        await update.message.reply_text("❌ Ник не может быть пустым")
-        return
-    
-    # Проверяем формат
-    if not all(c.isalnum() for c in nick):
-        await update.message.reply_text("❌ Только буквы и цифры (a-z, 0-9)")
-        return
-    
+    nick = context.args[0]
     await update.message.reply_text(f"🔍 Проверяю '{nick}'...")
     
-    # Сохраняем на GitHub
-    result = await save_nick_to_github(nick, str(user.id), user.full_name)
-    await update.message.reply_text(result)
+    if not GITHUB_TOKEN:
+        await update.message.reply_text(
+            "❌ GitHub токен не настроен!\n\n"
+            "ℹ️ Для настройки:\n"
+            "1. Зайди в Railway → Variables\n"
+            "2. Добавь переменную GITHUB_TOKEN\n"
+            "3. Значение: ghp_твой_токен\n"
+            "4. Сделай Manual Deploy"
+        )
+    else:
+        await update.message.reply_text(f"✅ GitHub токен найден! ({len(GITHUB_TOKEN)} символов)")
 
-async def status(update: Update, context: CallbackContext):
-    """Команда /status"""
-    message = (
-        f"📊 Статус бота:\n\n"
-        f"🔑 BOT_TOKEN: {'✅ OK' if TOKEN else '❌ НЕТ'}\n"
-        f"🔐 GITHUB_TOKEN: {'✅ OK' if GITHUB_TOKEN else '❌ НЕТ'}\n"
-        f"📁 Репозиторий: {GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}\n\n"
-        f"ℹ️ GitHub токен: {'Настроен' if GITHUB_TOKEN else 'Не настроен'}\n"
-        f"ℹ️ Для настройки зайди в Railway → Variables"
+async def debug(update: Update, context: CallbackContext):
+    """Команда /debug"""
+    await update.message.reply_text(
+        f"🔧 Отладочная информация:\n\n"
+        f"📊 Переменные окружения:\n"
+        f"• BOT_TOKEN: {'✅' if TOKEN else '❌'}\n"
+        f"• GITHUB_TOKEN: {'✅' if GITHUB_TOKEN else '❌'}\n"
+        f"• Всего переменных: {len(os.environ)}\n\n"
+        f"📝 Проверь Railway:\n"
+        f"1. Зайди в Railway → Variables\n"
+        f"2. Ищи GITHUB_TOKEN\n"
+        f"3. Если нет - добавь\n"
+        f"4. Сделай Manual Deploy"
     )
+
+async def vars_command(update: Update, context: CallbackContext):
+    """Команда /vars - показать все переменные"""
+    vars_list = []
+    for key in sorted(os.environ.keys()):
+        if "TOKEN" in key:
+            value = "***СКРЫТО***"
+        else:
+            value = os.environ[key]
+        vars_list.append(f"{key}: {value}")
+    
+    # Разбиваем на части если слишком много
+    message = "📋 Доступные переменные:\n\n" + "\n".join(vars_list[:20])
+    
+    if len(vars_list) > 20:
+        message += f"\n\n... и еще {len(vars_list) - 20} переменных"
+    
     await update.message.reply_text(message)
 
 # ========== ЗАПУСК ==========
@@ -168,9 +139,6 @@ def main():
     """Запуск бота"""
     if not TOKEN:
         print("❌ ОШИБКА: BOT_TOKEN не найден!")
-        print("ℹ️ Добавь в Railway Variables:")
-        print("   Name: BOT_TOKEN")
-        print("   Value: 8199840666:AAEMBSi3Y-SIN8cQqnBVso2B7fCKh7fb-Uk")
         return
     
     print("🤖 Запускаю бота...")
@@ -181,11 +149,11 @@ def main():
     # Добавляем команды
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("check", check))
-    app.add_handler(CommandHandler("status", status))
+    app.add_handler(CommandHandler("debug", debug))
+    app.add_handler(CommandHandler("vars", vars_command))
     
     print("✅ Бот запущен!")
-    print("📲 Напиши /start в Telegram")
-    print(f"🌐 GitHub: {'✅ Настроен' if GITHUB_TOKEN else '❌ Не настроен'}")
+    print("📲 Напиши /debug в Telegram")
     
     # Запускаем
     app.run_polling()
