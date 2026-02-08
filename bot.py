@@ -721,10 +721,20 @@ async def download_csv(update: Update, context: CallbackContext):
     )
 
 # ========== ОСНОВНАЯ ФУНКЦИЯ ==========
-async def main_async():
-    """Асинхронная основная функция запуска бота"""
-    # Инициализируем Supabase при старте
-    await init_supabase()
+def main():
+    """Точка входа - запускаем бота"""
+    # Синхронно инициализируем Supabase
+    print("🔄 Инициализация подключения к Supabase...")
+    
+    # Создаем новый event loop для инициализации
+    init_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(init_loop)
+    
+    try:
+        # Инициализируем Supabase синхронно
+        init_loop.run_until_complete(init_supabase())
+    finally:
+        init_loop.close()
     
     print("=" * 60)
     print("🤖 Telegram Bot with Supabase Integration")
@@ -749,13 +759,8 @@ async def main_async():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     
-    # Запускаем бота
-    await application.run_polling()
-
-def main():
-    """Точка входа - запускаем асинхронную функцию"""
-    # Запускаем асинхронную основную функцию
-    asyncio.run(main_async())
+    # Запускаем бота (он сам создаст свой event loop)
+    application.run_polling()
 
 if __name__ == '__main__':
     main()
