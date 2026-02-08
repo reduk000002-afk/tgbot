@@ -19,12 +19,8 @@ GITHUB_REPO_OWNER = "reduk000002-afk"
 GITHUB_REPO_NAME = "tgbot"
 
 # ========== БАЗА ДАННЫХ ПОЛЬЗОВАТЕЛЕЙ (100 пользователей) ==========
-# Формат: {логин: пароль}
 USERS_DATABASE = {
-    # Администратор (остается как был)
     "test": "12345",
-    
-    # 99 новых пользователей
     "XKPM738": "BaR42917",
     "QZTF194": "DiM58306",
     "LHRC562": "FoN79124",
@@ -126,7 +122,6 @@ USERS_DATABASE = {
     "WXEF098": "ZoD12345",
 }
 
-# ID администратора (остается в коде)
 ADMIN_ID = "7333863565"
 
 # ========== SUPABASE КОНФИГУРАЦИЯ ==========
@@ -137,8 +132,8 @@ SUPABASE_TABLE = "github_tokens"
 
 # ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
 GITHUB_TOKEN = None
-_local_users = {}
-_local_nicks = {}
+_local_users = {}  # {telegram_id: {login, name, auth_date}}
+_local_nicks = {}  # {nick: {user_id, user_login, user_name, check_date}}
 
 # ========== GITHUB НАСТРОЙКИ ==========
 NICKS_FILE_PATH = "nicks_database.json"
@@ -211,7 +206,6 @@ def update_github_token_in_supabase_sync(new_token: str) -> bool:
         
         deactivate_data = {"is_active": False}
         
-        # Деактивируем старые токены
         response = requests.patch(update_url, headers=headers, json=deactivate_data, timeout=10)
         if response.status_code not in [200, 204]:
             logger.warning(f"Не удалось деактивировать старые токены: {response.status_code}")
@@ -359,11 +353,18 @@ async def get_user(telegram_id: str) -> Optional[Dict]:
         return _local_users[telegram_id]
     return None
 
-async def save_nick(nick: str, manager_id: str, manager_name: str) -> bool:
+async def get_user_by_login(login: str) -> Optional[Dict]:
+    """Получить пользователя по логину"""
+    for telegram_id, user_data in _local_users.items():
+        if user_data.get('login') == login:
+            return {'telegram_id': telegram_id, **user_data}
+    return None
+
+async def save_nick(nick: str, manager_login: str, manager_name: str) -> bool:
     """Сохранить ник в GitHub"""
     global GITHUB_TOKEN
     
-    logger.info(f"Попытка сохранения ника '{nick}' для пользователя {manager_name}")
+    logger.info(f"Попытка сохранения ника '{nick}' для пользователя {manager_login} ({manager_name})")
     
     # Получаем токен из Supabase если еще не загружен
     if not GITHUB_TOKEN:
@@ -397,16 +398,18 @@ async def save_nick(nick: str, manager_id: str, manager_name: str) -> bool:
     
     # Проверяем, есть ли уже такой ник
     if nick in _local_nicks:
-        logger.info(f"❌ Ник '{nick}' уже занят (локально)")
+        existing_login = _local_nicks[nick].get('user_login')
+        logger.info(f"❌ Ник '{nick}' уже занят пользователем {existing_login}")
         return False
     
     if nick in nicks_data.get("nicks", {}):
-        logger.info(f"❌ Ник '{nick}' уже занят (на GitHub)")
+        existing_login = nicks_data["nicks"][nick].get('user_login')
+        logger.info(f"❌ Ник '{nick}' уже занят пользователем {existing_login}")
         return False
     
     # Добавляем ник
     nicks_data["nicks"][nick] = {
-        'user_id': manager_id,
+        'user_login': manager_login,  # Теперь храним логин, а не telegram_id
         'user_name': manager_name,
         'check_date': datetime.datetime.now().isoformat()
     }
@@ -461,8 +464,8 @@ async def get_nick(nick: str) -> Optional[Dict]:
     """Получить информацию о нике"""
     return _local_nicks.get(nick)
 
-async def get_all_nicks() -> List[Dict]:
-    """Получить все ники"""
+async def get_user_nicks(user_login: str) -> List[Dict]:
+    """Получить все ники пользователя по логину"""
     global GITHUB_TOKEN
     
     # Загружаем с GitHub при первом обращении
@@ -488,24 +491,25 @@ async def get_all_nicks() -> List[Dict]:
         except Exception as e:
             logger.error(f"Ошибка загрузки ников: {e}")
     
-    all_nicks = []
+    user_nicks = []
     for nick, info in _local_nicks.items():
-        date = info.get('check_date', '')[:10]
-        all_nicks.append({
-            'nick': nick,
-            'manager': info.get('user_name', 'Неизвестно'),
-            'date': date or 'Нет даты'
-        })
+        if info.get('user_login') == user_login:
+            date = info.get('check_date', '')[:10]
+            user_nicks.append({
+                'nick': nick,
+                'manager': info.get('user_name', 'Неизвестно'),
+                'date': date or 'Нет даты'
+            })
     
-    all_nicks.sort(key=lambda x: x['date'], reverse=True)
-    return all_nicks
+    user_nicks.sort(key=lambda x: x['date'], reverse=True)
+    return user_nicks
 
 # ========== ФУНКЦИИ ИНТЕРФЕЙСА ==========
 def get_main_menu():
     """Меню для администратора"""
     keyboard = [
         [KeyboardButton("🔍 Проверка ников")],
-        [KeyboardButton("📊 История ников")],
+        [KeyboardButton("📊 Мои ники")],
         [KeyboardButton("📝 Отправить отчет")],
         [KeyboardButton("💾 Резервная копия")],
         [KeyboardButton("📥 Скачать базу")],
@@ -520,7 +524,7 @@ def get_user_menu():
     """Меню для обычных пользователей"""
     keyboard = [
         [KeyboardButton("🔍 Проверка ников")],
-        [KeyboardButton("📊 История ников")],
+        [KeyboardButton("📊 Мои ники")],
         [KeyboardButton("📝 Отправить отчет")],
         [KeyboardButton("❌ Выход")]
     ]
@@ -631,6 +635,7 @@ async def handle_text(update: Update, context: CallbackContext):
         await update.message.reply_text("❌ Требуется авторизация. /start")
         return
     
+    user_login = user_data['login']
     current_menu = get_main_menu() if user_id == ADMIN_ID else get_user_menu()
     
     # Обработка меню
@@ -638,21 +643,28 @@ async def handle_text(update: Update, context: CallbackContext):
         await update.message.reply_text("Введите ник для проверки:")
         context.user_data['mode'] = 'check_nick'
     
-    elif text == "📊 История ников":
-        all_nicks = await get_all_nicks()
+    elif text == "📊 Мои ники":
+        # Показываем только ники текущего пользователя
+        user_nicks = await get_user_nicks(user_login)
         
-        if not all_nicks:
-            await update.message.reply_text("📭 В базе нет ников.", reply_markup=current_menu)
+        if not user_nicks:
+            await update.message.reply_text(
+                f"📭 У вас еще нет проверенных ников.\n"
+                f"Используйте '🔍 Проверка ников' для добавления.",
+                reply_markup=current_menu
+            )
         else:
-            response = f"📋 Последние 10 ников (всего: {len(all_nicks)}):\n\n"
-            for i, nick_info in enumerate(all_nicks[:10], 1):
-                response += f"{i}. {nick_info['nick']} - {nick_info['manager']} ({nick_info['date']})\n"
+            response = f"📋 Ваши проверенные ники (всего: {len(user_nicks)}):\n\n"
+            for i, nick_info in enumerate(user_nicks[:20], 1):
+                response += f"{i}. {nick_info['nick']} ({nick_info['date']})\n"
+            
+            if len(user_nicks) > 20:
+                response += f"\n... и еще {len(user_nicks) - 20} ников"
             
             if GITHUB_TOKEN:
-                response += f"\n📁 Файл на GitHub:"
-                response += f"\nhttps://github.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/blob/main/{NICKS_FILE_PATH}"
+                response += f"\n\n📁 Все данные хранятся на GitHub"
             else:
-                response += f"\n⚠️ Данные хранятся локально (GitHub не настроен)"
+                response += f"\n\n⚠️ Данные хранятся локально (GitHub не настроен)"
             
             await update.message.reply_text(response, reply_markup=current_menu)
     
@@ -763,24 +775,25 @@ async def handle_text(update: Update, context: CallbackContext):
         if nick:
             user_name = user_data['name']
             
-            logger.info(f"Проверка ника '{nick}' для пользователя {user_name}")
+            logger.info(f"Проверка ника '{nick}' для пользователя {user_login} ({user_name})")
             
-            # Проверяем ник
+            # Проверяем ник по логину пользователя
             existing = await get_nick(nick)
             
             if existing:
-                if existing['user_id'] == user_id:
-                    await update.message.reply_text(f"❌ Ник '{nick}' уже проверен вами.")
+                existing_login = existing.get('user_login')
+                if existing_login == user_login:
+                    await update.message.reply_text(f"❌ Ник '{nick}' уже проверен вами ранее.")
                 else:
-                    await update.message.reply_text(f"❌ Ник '{nick}' занят менеджером {existing['user_name']}.")
+                    await update.message.reply_text(f"❌ Ник '{nick}' уже занят другим пользователем.")
             else:
                 # Сохраняем новый ник
-                success = await save_nick(nick, user_id, user_name)
+                success = await save_nick(nick, user_login, user_name)
                 if success:
-                    all_nicks = await get_all_nicks()
+                    user_nicks = await get_user_nicks(user_login)
                     await update.message.reply_text(
-                        f"✅ Ник '{nick}' свободен и закреплен!\n"
-                        f"📊 Всего ников в базе: {len(all_nicks)}\n"
+                        f"✅ Ник '{nick}' свободен и закреплен за вами!\n"
+                        f"📊 Всего ваших ников: {len(user_nicks)}\n"
                         f"📡 Сохранено в: {'GitHub' if GITHUB_TOKEN else 'локальное хранилище'}"
                     )
                 else:
@@ -797,32 +810,59 @@ async def handle_text(update: Update, context: CallbackContext):
             await update.message.reply_text("❌ Отчет не может быть пустым!")
 
 async def download_csv(update: Update, context: CallbackContext):
-    """Скачать базу в CSV"""
-    all_nicks = await get_all_nicks()
+    """Скачать базу в CSV (только для администратора)"""
+    user_id = str(update.effective_user.id)
     
-    if not all_nicks:
+    if user_id != ADMIN_ID:
+        await update.message.reply_text("❌ Только для администратора")
+        return
+    
+    # Получаем ВСЕ ники для администратора
+    global GITHUB_TOKEN
+    
+    if not GITHUB_TOKEN:
+        GITHUB_TOKEN = await get_github_token_from_supabase()
+    
+    if GITHUB_TOKEN and not _local_nicks:
+        try:
+            headers = {'Authorization': f'token {GITHUB_TOKEN}'}
+            url = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/contents/{NICKS_FILE_PATH}"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        content = base64.b64decode(data['content']).decode('utf-8')
+                        nicks_data = json.loads(content)
+                        
+                        for nick, info in nicks_data.get("nicks", {}).items():
+                            _local_nicks[nick] = info
+        except Exception as e:
+            logger.error(f"Ошибка загрузки ников: {e}")
+    
+    if not _local_nicks:
         await update.message.reply_text("📭 В базе нет ников.")
         return
     
-    # Создаем CSV
+    # Создаем CSV со ВСЕМИ никами
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['Ник', 'Менеджер', 'Дата проверки', 'Источник'])
+    writer.writerow(['Ник', 'Логин пользователя', 'Имя', 'Дата проверки'])
     
-    for nick_info in all_nicks:
+    for nick, info in _local_nicks.items():
         writer.writerow([
-            nick_info['nick'],
-            nick_info['manager'],
-            nick_info['date'],
-            'GitHub + Supabase' if GITHUB_TOKEN else 'Локальное'
+            nick,
+            info.get('user_login', 'Неизвестно'),
+            info.get('user_name', 'Неизвестно'),
+            info.get('check_date', '')[:10]
         ])
     
     bio = io.BytesIO(output.getvalue().encode('utf-8'))
-    bio.name = f'nicks_{datetime.datetime.now().strftime("%d-%m-%Y_%H-%M")}.csv'
+    bio.name = f'all_nicks_{datetime.datetime.now().strftime("%d-%m-%Y_%H-%M")}.csv'
     
     await update.message.reply_document(
         document=bio,
-        caption=f"📊 База ников\n✅ Записей: {len(all_nicks)}\n"
+        caption=f"📊 Полная база ников\n✅ Записей: {len(_local_nicks)}\n"
                 f"📡 Источник токена: {'Supabase' if GITHUB_TOKEN else 'Локальный'}"
     )
 
@@ -832,7 +872,7 @@ def main():
     global GITHUB_TOKEN
     
     print("=" * 60)
-    print("🚀 Telegram Bot with 100 Users & Supabase")
+    print("🚀 Telegram Bot - Личная история ников")
     print("=" * 60)
     print(f"✅ BOT_TOKEN: {'Настроен' if TOKEN else 'Нет'}")
     print(f"✅ SUPABASE_URL: {SUPABASE_URL}")
@@ -846,9 +886,7 @@ def main():
     # СИНХРОННО загружаем токен из Supabase
     print("🔄 Инициализация подключения к Supabase...")
     try:
-        # Проверяем подключение
         if check_supabase_connection_sync():
-            # Загружаем токен
             GITHUB_TOKEN = get_github_token_from_supabase_sync()
             if GITHUB_TOKEN:
                 print(f"✅ GitHub токен загружен из Supabase: {GITHUB_TOKEN[:10]}...")
@@ -860,7 +898,7 @@ def main():
         print(f"❌ Ошибка инициализации Supabase: {e}")
     
     print("=" * 60)
-    print("🤖 Telegram Bot with Supabase Integration")
+    print("🤖 Telegram Bot with Personal Nick History")
     print("=" * 60)
     print(f"✅ BOT_TOKEN: Настроен")
     print(f"✅ SUPABASE_URL: {SUPABASE_URL}")
@@ -873,6 +911,7 @@ def main():
     print("=" * 60)
     print("📲 Используйте /start в Telegram для начала работы")
     print("ℹ️  Логин: любой из 100 пользователей, пароль: соответствующий")
+    print("💡 Каждый видит ТОЛЬКО свою историю ников!")
     print("⚠️  Проверяй логи в Railway для отладки!")
     print("=" * 60)
     
@@ -883,11 +922,10 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     
-    # Запускаем бота (он сам создаст свой event loop)
+    # Запускаем бота
     application.run_polling()
 
 if __name__ == '__main__':
-    # Устанавливаем обработчик для корректного завершения
     try:
         main()
     except KeyboardInterrupt:
