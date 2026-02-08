@@ -46,6 +46,24 @@ except Exception as e:
     logger.error(f"❌ Ошибка инициализации Supabase: {e}")
     supabase = None
 
+# ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
+GITHUB_TOKEN = None  # Будет загружаться из Supabase при старте
+_local_users = {}
+_local_nicks = {}
+
+# ========== GITHUB НАСТРОЙКИ ==========
+NICKS_FILE_PATH = "nicks_database.json"
+USERS_FILE_PATH = "users_database.json"
+
+print("=" * 60)
+print("🚀 Telegram Bot with Supabase & GitHub Storage")
+print("=" * 60)
+print(f"✅ BOT_TOKEN: {'Настроен' if TOKEN else 'Нет'}")
+print(f"✅ SUPABASE_URL: {SUPABASE_URL[:30]}...")
+print(f"👑 Админ ID: {ADMIN_ID}")
+print(f"👤 Репозиторий: {GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}")
+print("=" * 60)
+
 # ========== ФУНКЦИИ ДЛЯ РАБОТЫ С SUPABASE ==========
 async def get_github_token_from_supabase() -> Optional[str]:
     """Получить GitHub токен из Supabase"""
@@ -115,24 +133,6 @@ async def update_github_token_in_supabase(new_token: str) -> bool:
     except Exception as e:
         logger.error(f"❌ Ошибка при обновлении токена в Supabase: {e}")
         return False
-
-# ========== ОСНОВНЫЕ ПЕРЕМЕННЫЕ ==========
-GITHUB_TOKEN = None  # Будет загружаться из Supabase при старте
-_local_users = {}
-_local_nicks = {}
-
-# ========== GITHUB НАСТРОЙКИ ==========
-NICKS_FILE_PATH = "nicks_database.json"
-USERS_FILE_PATH = "users_database.json"
-
-print("=" * 60)
-print("🚀 Telegram Bot with Supabase & GitHub Storage")
-print("=" * 60)
-print(f"✅ BOT_TOKEN: {'Настроен' if TOKEN else 'Нет'}")
-print(f"✅ SUPABASE_URL: {SUPABASE_URL[:30]}...")
-print(f"👑 Админ ID: {ADMIN_ID}")
-print(f"👤 Репозиторий: {GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}")
-print("=" * 60)
 
 # ========== УПРОЩЕННЫЕ ФУНКЦИИ ==========
 async def save_user(telegram_id: str, login: str, name: str) -> bool:
@@ -398,13 +398,14 @@ def get_user_menu():
 # ========== ОБРАБОТЧИКИ КОМАНД ==========
 async def start(update: Update, context: CallbackContext):
     """Обработчик команды /start"""
+    global GITHUB_TOKEN
+    
     user_id = str(update.effective_user.id)
     user_name = update.effective_user.full_name
     
     logger.info(f"Команда /start от {user_id} ({user_name})")
     
     # Пытаемся загрузить GitHub токен при старте
-    global GITHUB_TOKEN
     if not GITHUB_TOKEN:
         GITHUB_TOKEN = await get_github_token_from_supabase()
         if GITHUB_TOKEN:
@@ -431,6 +432,8 @@ async def start(update: Update, context: CallbackContext):
 
 async def handle_text(update: Update, context: CallbackContext):
     """Обработчик текстовых сообщений"""
+    global GITHUB_TOKEN
+    
     user_id = str(update.effective_user.id)
     text = update.message.text.strip()
     
@@ -571,7 +574,6 @@ async def handle_text(update: Update, context: CallbackContext):
         if text.startswith("ghp_"):
             success = await update_github_token_in_supabase(text)
             if success:
-                global GITHUB_TOKEN
                 GITHUB_TOKEN = text  # Обновляем в памяти
                 await update.message.reply_text(
                     f"✅ GitHub токен успешно обновлен в Supabase!\n"
