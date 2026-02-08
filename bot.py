@@ -9,20 +9,122 @@ import base64
 import asyncio
 from typing import Dict, List, Optional
 import aiohttp
+import requests
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
 
 # ========== КОНФИГУРАЦИЯ ==========
-# Токен Telegram бота (остается в коде)
 TOKEN = "8199840666:AAEMBSi3Y-SIN8cQqnBVso2B7fCKh7fb-Uk"
-
-# Настройки GitHub репозитория (остаются в коде)
 GITHUB_REPO_OWNER = "reduk000002-afk"
 GITHUB_REPO_NAME = "tgbot"
 
-# Данные для авторизации (остаются в коде)
-VALID_LOGIN = "test"
-VALID_PASSWORD = "12345"
+# ========== БАЗА ДАННЫХ ПОЛЬЗОВАТЕЛЕЙ (100 пользователей) ==========
+# Формат: {логин: пароль}
+USERS_DATABASE = {
+    # Администратор (остается как был)
+    "test": "12345",
+    
+    # 99 новых пользователей
+    "XKPM738": "BaR42917",
+    "QZTF194": "DiM58306",
+    "LHRC562": "FoN79124",
+    "VNJS850": "GeT36589",
+    "BWYG347": "HuL24703",
+    "MDKA619": "JaP60852",
+    "STXQ072": "KiR19437",
+    "YPLO483": "LuN52860",
+    "CRNZ961": "MeQ71349",
+    "GIBU258": "NoS39527",
+    "FEWV730": "PaT14683",
+    "JKXD425": "QuR70952",
+    "OHMQ167": "RiS23894",
+    "ZYRG509": "SaV68103",
+    "BPIT382": "TeW45729",
+    "UNLC741": "UaX92316",
+    "VMHS095": "VaY67428",
+    "AQDF263": "WeZ31907",
+    "XTKN874": "XiA58492",
+    "RJLQ519": "YoB76301",
+    "SCGP682": "ZaC29845",
+    "DHOB403": "AbD61793",
+    "FMYE170": "BeE34208",
+    "KWHT934": "CiF79561",
+    "NRVU758": "DoG12047",
+    "QGXI286": "EuH56392",
+    "PZOD641": "FaI87403",
+    "ULBA927": "GoJ21659",
+    "EJYQ350": "HaK73804",
+    "IMCN809": "IiL49527",
+    "OTRF572": "JoM61083",
+    "VWXH136": "KuN32497",
+    "YADK749": "LaO57816",
+    "BQEU980": "MiP24903",
+    "CPMZ317": "NoQ86124",
+    "DGRT654": "OuR30759",
+    "ESLA082": "PaS49216",
+    "FTUN435": "QiT73508",
+    "GHBV791": "RuU16492",
+    "IJXY208": "SaV38057",
+    "KMZO963": "TiW51924",
+    "LNPQ124": "UoX67203",
+    "MOUR579": "VaY18456",
+    "PQAV306": "WeZ93702",
+    "RSBX742": "XaA65819",
+    "TUCD185": "YoB20347",
+    "VWEF630": "ZaC41968",
+    "XYGH973": "AdD75203",
+    "ZAIJ418": "BeE18654",
+    "BCKQ761": "CiF30927",
+    "DEMV204": "DoG57419",
+    "FGNO857": "EuH82603",
+    "HIPR392": "FaI14567",
+    "JKST029": "GoJ39802",
+    "LMUV564": "HaK75134",
+    "NOPW931": "IiL26948",
+    "QRXY278": "JoM41307",
+    "STZA645": "KuN98752",
+    "UVBC012": "LaO23416",
+    "WXDE379": "MiP56928",
+    "YZFG846": "NoQ10273",
+    "ABHI213": "OuR45809",
+    "CDJK580": "PaS62174",
+    "EFLM947": "QiT39416",
+    "GHNP314": "RuU85720",
+    "IJQR681": "SaV13945",
+    "KLST058": "TiW76208",
+    "MNUV325": "UoX29137",
+    "OPWX792": "VaY54816",
+    "QRYZ169": "WeZ90327",
+    "STAB436": "XaA16485",
+    "UVCD803": "YoB73902",
+    "WXEF270": "ZaC28546",
+    "YZGH537": "AdD41093",
+    "ABIJ904": "BeE67218",
+    "CDKL371": "CiF83904",
+    "EFMN648": "DoG12567",
+    "GHOP015": "EuH39482",
+    "IJQR382": "FaI56701",
+    "KLST759": "GoJ23894",
+    "MNUV126": "HaK45017",
+    "OPWX493": "IiL89236",
+    "QRYZ860": "JoM31745",
+    "STAB237": "KuN56489",
+    "UVCD504": "LaO78123",
+    "WXEF875": "MiP23690",
+    "YZGH146": "NoQ45781",
+    "ABIJ427": "OuR69023",
+    "CDKL718": "PaS31456",
+    "EFMN089": "QiT87201",
+    "GHOP350": "RuV45912",
+    "IJQR761": "SaW68304",
+    "KLST032": "TiX12789",
+    "MNUV413": "UoY34567",
+    "OPWX794": "VaZ89123",
+    "QRYZ125": "WeA45678",
+    "STAB436": "XoB23456",
+    "UVCD767": "YaC78901",
+    "WXEF098": "ZoD12345",
+}
 
 # ID администратора (остается в коде)
 ADMIN_ID = "7333863565"
@@ -55,8 +157,6 @@ logger = logging.getLogger(__name__)
 # ========== СИНХРОННЫЕ ФУНКЦИИ ДЛЯ SUPABASE ==========
 def get_github_token_from_supabase_sync() -> Optional[str]:
     """Синхронная версия получения GitHub токена из Supabase"""
-    import requests
-    
     try:
         url = f"{SUPABASE_URL}/rest/v1/{SUPABASE_TABLE}?select=github_token&is_active=eq.true&order=created_at.desc&limit=1"
         
@@ -98,8 +198,6 @@ def get_github_token_from_supabase_sync() -> Optional[str]:
 
 def update_github_token_in_supabase_sync(new_token: str) -> bool:
     """Синхронная версия обновления GitHub токена в Supabase"""
-    import requests
-    
     try:
         # 1. Деактивируем все старые токены
         update_url = f"{SUPABASE_URL}/rest/v1/{SUPABASE_TABLE}?is_active=eq.true"
@@ -143,8 +241,6 @@ def update_github_token_in_supabase_sync(new_token: str) -> bool:
 
 def check_supabase_connection_sync() -> bool:
     """Синхронная проверка подключения к Supabase"""
-    import requests
-    
     try:
         url = f"{SUPABASE_URL}/rest/v1/"
         headers = {
@@ -415,6 +511,7 @@ def get_main_menu():
         [KeyboardButton("📥 Скачать базу")],
         [KeyboardButton("🌐 Показать GitHub файл")],
         [KeyboardButton("⚙️ Обновить GitHub токен")],
+        [KeyboardButton("📋 Список пользователей")],
         [KeyboardButton("❌ Выход")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -428,6 +525,15 @@ def get_user_menu():
         [KeyboardButton("❌ Выход")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+# ========== ПРОВЕРКА ЛОГИНА И ПАРОЛЯ ==========
+def check_credentials(login: str, password: str) -> bool:
+    """Проверить логин и пароль"""
+    return login in USERS_DATABASE and USERS_DATABASE[login] == password
+
+def get_all_logins() -> List[str]:
+    """Получить список всех логинов"""
+    return list(USERS_DATABASE.keys())
 
 # ========== ОБРАБОТЧИКИ КОМАНД ==========
 async def start(update: Update, context: CallbackContext):
@@ -452,7 +558,8 @@ async def start(update: Update, context: CallbackContext):
         if user_id == ADMIN_ID:
             await update.message.reply_text(
                 f"✅ Добро пожаловать, Администратор!\n"
-                f"📊 GitHub токен: {'✅ Загружен' if GITHUB_TOKEN else '❌ Отсутствует'}",
+                f"📊 GitHub токен: {'✅ Загружен' if GITHUB_TOKEN else '❌ Отсутствует'}\n"
+                f"👥 Всего пользователей в системе: {len(USERS_DATABASE)}",
                 reply_markup=get_main_menu()
             )
         else:
@@ -477,7 +584,7 @@ async def handle_text(update: Update, context: CallbackContext):
     if 'auth_step' in context.user_data:
         if context.user_data['auth_step'] == 'login':
             logger.info(f"Проверка логина: '{text}'")
-            if text == VALID_LOGIN:
+            if text in USERS_DATABASE:
                 context.user_data['auth_step'] = 'password'
                 context.user_data['login'] = text
                 await update.message.reply_text("Введите пароль:")
@@ -487,7 +594,8 @@ async def handle_text(update: Update, context: CallbackContext):
         elif context.user_data['auth_step'] == 'password':
             login = context.user_data.get('login', '')
             logger.info(f"Проверка пароля для '{login}': введено '{text}'")
-            if text == VALID_PASSWORD:
+            
+            if check_credentials(login, text):
                 user_name = update.effective_user.full_name
                 
                 success = await save_user(user_id, login, user_name)
@@ -501,7 +609,8 @@ async def handle_text(update: Update, context: CallbackContext):
                 if user_id == ADMIN_ID:
                     await update.message.reply_text(
                         f"✅ Авторизация успешна! Администратор!\n"
-                        f"📊 GitHub токен: {'✅ Загружен' if GITHUB_TOKEN else '❌ Отсутствует'}",
+                        f"📊 GitHub токен: {'✅ Загружен' if GITHUB_TOKEN else '❌ Отсутствует'}\n"
+                        f"👥 Всего пользователей в системе: {len(USERS_DATABASE)}",
                         reply_markup=get_main_menu()
                     )
                 else:
@@ -589,6 +698,26 @@ async def handle_text(update: Update, context: CallbackContext):
                 reply_markup=ReplyKeyboardMarkup([[KeyboardButton("❌ Отмена")]], resize_keyboard=True)
             )
             context.user_data['mode'] = 'update_github_token'
+        else:
+            await update.message.reply_text("❌ Только для администратора")
+    
+    elif text == "📋 Список пользователей":
+        if user_id == ADMIN_ID:
+            # Показываем первые 20 логинов из базы
+            logins = get_all_logins()
+            response = f"👥 Список пользователей (всего: {len(logins)}):\n\n"
+            
+            # Группируем по 10 в строку
+            for i in range(0, min(20, len(logins)), 5):
+                chunk = logins[i:i+5]
+                response += f"{i+1}-{i+len(chunk)}: {' | '.join(chunk)}\n"
+            
+            if len(logins) > 20:
+                response += f"\n... и еще {len(logins) - 20} пользователей"
+            
+            response += f"\n\n💡 Формат: Логин - Пароль"
+            
+            await update.message.reply_text(response, reply_markup=current_menu)
         else:
             await update.message.reply_text("❌ Только для администратора")
     
@@ -703,7 +832,7 @@ def main():
     global GITHUB_TOKEN
     
     print("=" * 60)
-    print("🚀 Telegram Bot with Supabase")
+    print("🚀 Telegram Bot with 100 Users & Supabase")
     print("=" * 60)
     print(f"✅ BOT_TOKEN: {'Настроен' if TOKEN else 'Нет'}")
     print(f"✅ SUPABASE_URL: {SUPABASE_URL}")
@@ -711,6 +840,7 @@ def main():
     print(f"🔑 SUPABASE_KEY: {SUPABASE_KEY[:20]}...")
     print(f"👑 Админ ID: {ADMIN_ID}")
     print(f"👤 Репозиторий: {GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}")
+    print(f"👥 Всего пользователей: {len(USERS_DATABASE)}")
     print("=" * 60)
     
     # СИНХРОННО загружаем токен из Supabase
@@ -738,10 +868,11 @@ def main():
     print(f"🔑 SUPABASE_KEY: Используется service_role ключ")
     print(f"👑 Админ ID: {ADMIN_ID}")
     print(f"👤 Репозиторий: {GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}")
+    print(f"👥 Всего пользователей: {len(USERS_DATABASE)}")
     print(f"🔑 GitHub токен: {'✅ Загружен' if GITHUB_TOKEN else '❌ Отсутствует'}")
     print("=" * 60)
     print("📲 Используйте /start в Telegram для начала работы")
-    print("ℹ️  Логин: test, пароль: 12345")
+    print("ℹ️  Логин: любой из 100 пользователей, пароль: соответствующий")
     print("⚠️  Проверяй логи в Railway для отладки!")
     print("=" * 60)
     
