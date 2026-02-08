@@ -35,10 +35,8 @@ ADMIN_ID = "7333863565"
 SUPABASE_URL = "https://wkukgnkfbxgpvlraczeu.supabase.co"
 SUPABASE_PROJECT_ID = "wkukgnkfbxgpvlraczeu"
 
-# ВАЖНО: Ты должен получить ПРАВИЛЬНЫЙ anon ключ!
-# Зайди в Supabase → Settings → API → "anon public" key (начинается с eyJhbG...)
-# Или используй service role key для записи:
-SUPABASE_KEY = "sb_secret_-_i6bNuyDrQOrEn0JVLptQ_FQYLUDLf"  # Твой секретный ключ
+# Твой секретный ключ для записи/чтения
+SUPABASE_KEY = "sb_secret_-_i6bNuyDrQOrEn0JVLptQ_FQYLUDLf"
 
 SUPABASE_TABLE = "github_tokens"
 
@@ -96,7 +94,6 @@ async def get_github_token_from_supabase() -> Optional[str]:
                         logger.error("❌ Нет данных в таблице github_tokens")
                 elif response.status == 401:
                     logger.error("❌ Ошибка авторизации: неверный ключ Supabase")
-                    logger.error("⚠️ Проверь что используешь service_role key или правильный anon key")
                 elif response.status == 404:
                     logger.error(f"❌ Таблица '{SUPABASE_TABLE}' не найдена")
                 else:
@@ -194,14 +191,7 @@ async def init_supabase():
     else:
         logger.warning("⚠️ GitHub токен не найден в Supabase")
 
-# ========== ОСТАЛЬНЫЕ ФУНКЦИИ (ТЕ ЖЕ САМЫЕ) ==========
-# [ВСТАВЬ СЮДА ВСЕ ОСТАЛЬНЫЕ ФУНКЦИИ ИЗ ПРЕДЫДУЩЕГО КОДА]
-# save_user, get_user, save_nick, get_nick, get_all_nicks,
-# get_main_menu, get_user_menu, start, handle_text, download_csv
-
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
-
+# ========== УПРОЩЕННЫЕ ФУНКЦИИ ==========
 async def save_user(telegram_id: str, login: str, name: str) -> bool:
     """Сохранить пользователя в GitHub"""
     global GITHUB_TOKEN
@@ -434,6 +424,10 @@ async def get_all_nicks() -> List[Dict]:
     all_nicks.sort(key=lambda x: x['date'], reverse=True)
     return all_nicks
 
+# ========== ФУНКЦИИ ИНТЕРФЕЙСА ==========
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
+
 def get_main_menu():
     """Меню для администратора"""
     keyboard = [
@@ -458,6 +452,7 @@ def get_user_menu():
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
+# ========== ОБРАБОТЧИКИ КОМАНД ==========
 async def start(update: Update, context: CallbackContext):
     """Обработчик команды /start"""
     global GITHUB_TOKEN
@@ -726,21 +721,10 @@ async def download_csv(update: Update, context: CallbackContext):
     )
 
 # ========== ОСНОВНАЯ ФУНКЦИЯ ==========
-def main():
-    """Основная функция запуска бота"""
+async def main_async():
+    """Асинхронная основная функция запуска бота"""
     # Инициализируем Supabase при старте
-    import asyncio
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(init_supabase())
-    loop.close()
-    
-    # Создаем и настраиваем приложение бота
-    application = Application.builder().token(TOKEN).build()
-    
-    # Добавляем обработчики
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    await init_supabase()
     
     print("=" * 60)
     print("🤖 Telegram Bot with Supabase Integration")
@@ -758,8 +742,20 @@ def main():
     print("⚠️  Проверяй логи в Railway для отладки!")
     print("=" * 60)
     
+    # Создаем и настраиваем приложение бота
+    application = Application.builder().token(TOKEN).build()
+    
+    # Добавляем обработчики
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    
     # Запускаем бота
-    application.run_polling()
+    await application.run_polling()
+
+def main():
+    """Точка входа - запускаем асинхронную функцию"""
+    # Запускаем асинхронную основную функцию
+    asyncio.run(main_async())
 
 if __name__ == '__main__':
     main()
