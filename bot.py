@@ -1,4 +1,5 @@
 import os
+import sys
 import logging
 import json
 import datetime
@@ -8,13 +9,8 @@ import base64
 import asyncio
 from typing import Dict, List, Optional
 import aiohttp
-
-# Настройка логирования
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
 
 # ========== КОНФИГУРАЦИЯ ==========
 # Токен Telegram бота (остается в коде)
@@ -34,25 +30,11 @@ ADMIN_ID = "7333863565"
 # ========== SUPABASE КОНФИГУРАЦИЯ ==========
 SUPABASE_URL = "https://wkukgnkfbxgpvlraczeu.supabase.co"
 SUPABASE_PROJECT_ID = "wkukgnkfbxgpvlraczeu"
-
-# Твой секретный ключ для записи/чтения
 SUPABASE_KEY = "sb_secret_-_i6bNuyDrQOrEn0JVLptQ_FQYLUDLf"
-
 SUPABASE_TABLE = "github_tokens"
 
-print("=" * 60)
-print("🚀 Telegram Bot with Supabase")
-print("=" * 60)
-print(f"✅ BOT_TOKEN: {'Настроен' if TOKEN else 'Нет'}")
-print(f"✅ SUPABASE_URL: {SUPABASE_URL}")
-print(f"✅ PROJECT_ID: {SUPABASE_PROJECT_ID}")
-print(f"🔑 SUPABASE_KEY: {SUPABASE_KEY[:20]}...")
-print(f"👑 Админ ID: {ADMIN_ID}")
-print(f"👤 Репозиторий: {GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}")
-print("=" * 60)
-
 # ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
-GITHUB_TOKEN = None  # Будет загружаться из Supabase при старте
+GITHUB_TOKEN = None
 _local_users = {}
 _local_nicks = {}
 
@@ -60,11 +42,22 @@ _local_nicks = {}
 NICKS_FILE_PATH = "nicks_database.json"
 USERS_FILE_PATH = "users_database.json"
 
-# ========== ФУНКЦИИ ДЛЯ РАБОТЫ С SUPABASE ==========
-async def get_github_token_from_supabase() -> Optional[str]:
-    """Получить GitHub токен из Supabase через REST API"""
+# ========== НАСТРОЙКА ЛОГИРОВАНИЯ ==========
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO,
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# ========== СИНХРОННЫЕ ФУНКЦИИ ДЛЯ SUPABASE ==========
+def get_github_token_from_supabase_sync() -> Optional[str]:
+    """Синхронная версия получения GitHub токена из Supabase"""
+    import requests
+    
     try:
-        # Формируем URL для запроса
         url = f"{SUPABASE_URL}/rest/v1/{SUPABASE_TABLE}?select=github_token&is_active=eq.true&order=created_at.desc&limit=1"
         
         headers = {
@@ -75,38 +68,38 @@ async def get_github_token_from_supabase() -> Optional[str]:
         
         logger.info(f"Запрос к Supabase: {url}")
         
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as response:
-                logger.info(f"Статус ответа Supabase: {response.status}")
-                
-                if response.status == 200:
-                    data = await response.json()
-                    logger.info(f"Данные от Supabase: {data}")
-                    
-                    if data and len(data) > 0:
-                        token = data[0].get("github_token")
-                        if token:
-                            logger.info(f"✅ GitHub токен получен из Supabase: {token[:10]}...")
-                            return token
-                        else:
-                            logger.error("❌ Поле github_token пустое в данных Supabase")
-                    else:
-                        logger.error("❌ Нет данных в таблице github_tokens")
-                elif response.status == 401:
-                    logger.error("❌ Ошибка авторизации: неверный ключ Supabase")
-                elif response.status == 404:
-                    logger.error(f"❌ Таблица '{SUPABASE_TABLE}' не найдена")
+        response = requests.get(url, headers=headers, timeout=10)
+        logger.info(f"Статус ответа Supabase: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            logger.info(f"Данные от Supabase: {data}")
+            
+            if data and len(data) > 0:
+                token = data[0].get("github_token")
+                if token:
+                    logger.info(f"✅ GitHub токен получен из Supabase: {token[:10]}...")
+                    return token
                 else:
-                    error_text = await response.text()
-                    logger.error(f"❌ Ошибка Supabase API: {response.status} - {error_text}")
-                    
+                    logger.error("❌ Поле github_token пустое в данных Supabase")
+            else:
+                logger.error("❌ Нет данных в таблице github_tokens")
+        elif response.status_code == 401:
+            logger.error("❌ Ошибка авторизации: неверный ключ Supabase")
+        elif response.status_code == 404:
+            logger.error(f"❌ Таблица '{SUPABASE_TABLE}' не найдена")
+        else:
+            logger.error(f"❌ Ошибка Supabase API: {response.status_code} - {response.text}")
+            
     except Exception as e:
         logger.error(f"❌ Ошибка подключения к Supabase: {e}")
     
     return None
 
-async def update_github_token_in_supabase(new_token: str) -> bool:
-    """Обновить GitHub токен в Supabase (для администратора)"""
+def update_github_token_in_supabase_sync(new_token: str) -> bool:
+    """Синхронная версия обновления GitHub токена в Supabase"""
+    import requests
+    
     try:
         # 1. Деактивируем все старые токены
         update_url = f"{SUPABASE_URL}/rest/v1/{SUPABASE_TABLE}?is_active=eq.true"
@@ -120,38 +113,38 @@ async def update_github_token_in_supabase(new_token: str) -> bool:
         
         deactivate_data = {"is_active": False}
         
-        async with aiohttp.ClientSession() as session:
-            # Деактивируем старые токены
-            async with session.patch(update_url, headers=headers, json=deactivate_data) as response:
-                if response.status not in [200, 204]:
-                    logger.warning(f"Не удалось деактивировать старые токены: {response.status}")
+        # Деактивируем старые токены
+        response = requests.patch(update_url, headers=headers, json=deactivate_data, timeout=10)
+        if response.status_code not in [200, 204]:
+            logger.warning(f"Не удалось деактивировать старые токены: {response.status_code}")
+        
+        # 2. Добавляем новый токен
+        insert_url = f"{SUPABASE_URL}/rest/v1/{SUPABASE_TABLE}"
+        
+        new_token_data = {
+            "github_token": new_token,
+            "token_name": "main",
+            "description": "Обновленный через бота",
+            "is_active": True,
+            "created_at": datetime.datetime.now().isoformat()
+        }
+        
+        response = requests.post(insert_url, headers=headers, json=new_token_data, timeout=10)
+        if response.status_code in [200, 201]:
+            logger.info("✅ GitHub токен успешно обновлен в Supabase")
+            return True
+        else:
+            logger.error(f"❌ Ошибка добавления токена: {response.status_code} - {response.text}")
+            return False
             
-            # 2. Добавляем новый токен
-            insert_url = f"{SUPABASE_URL}/rest/v1/{SUPABASE_TABLE}"
-            
-            new_token_data = {
-                "github_token": new_token,
-                "token_name": "main",
-                "description": "Обновленный через бота",
-                "is_active": True,
-                "created_at": datetime.datetime.now().isoformat()
-            }
-            
-            async with session.post(insert_url, headers=headers, json=new_token_data) as response:
-                if response.status in [200, 201]:
-                    logger.info("✅ GitHub токен успешно обновлен в Supabase")
-                    return True
-                else:
-                    error_text = await response.text()
-                    logger.error(f"❌ Ошибка добавления токена: {response.status} - {error_text}")
-                    return False
-                    
     except Exception as e:
         logger.error(f"❌ Ошибка при обновлении токена в Supabase: {e}")
         return False
 
-async def check_supabase_connection():
-    """Проверить подключение к Supabase"""
+def check_supabase_connection_sync() -> bool:
+    """Синхронная проверка подключения к Supabase"""
+    import requests
+    
     try:
         url = f"{SUPABASE_URL}/rest/v1/"
         headers = {
@@ -159,39 +152,26 @@ async def check_supabase_connection():
             "Authorization": f"Bearer {SUPABASE_KEY}"
         }
         
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    logger.info("✅ Подключение к Supabase успешно")
-                    return True
-                else:
-                    logger.error(f"❌ Ошибка подключения к Supabase: {response.status}")
-                    return False
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            logger.info("✅ Подключение к Supabase успешно")
+            return True
+        else:
+            logger.error(f"❌ Ошибка подключения к Supabase: {response.status_code}")
+            return False
     except Exception as e:
         logger.error(f"❌ Исключение при подключении к Supabase: {e}")
         return False
 
-# ========== ПРОВЕРКА ПОДКЛЮЧЕНИЯ ПРИ СТАРТЕ ==========
-async def init_supabase():
-    """Инициализировать подключение к Supabase"""
-    global GITHUB_TOKEN
-    
-    logger.info("🔄 Инициализация подключения к Supabase...")
-    
-    # Проверяем подключение
-    connected = await check_supabase_connection()
-    if not connected:
-        logger.warning("⚠️ Не удалось подключиться к Supabase. GitHub токен будет отсутствовать.")
-        return
-    
-    # Пытаемся получить токен
-    GITHUB_TOKEN = await get_github_token_from_supabase()
-    if GITHUB_TOKEN:
-        logger.info(f"✅ GitHub токен загружен из Supabase")
-    else:
-        logger.warning("⚠️ GitHub токен не найден в Supabase")
+# ========== АСИНХРОННЫЕ ФУНКЦИИ ДЛЯ GITHUB ==========
+async def get_github_token_from_supabase() -> Optional[str]:
+    """Асинхронная обертка для получения токена"""
+    return get_github_token_from_supabase_sync()
 
-# ========== УПРОЩЕННЫЕ ФУНКЦИИ ==========
+async def update_github_token_in_supabase(new_token: str) -> bool:
+    """Асинхронная обертка для обновления токена"""
+    return update_github_token_in_supabase_sync(new_token)
+
 async def save_user(telegram_id: str, login: str, name: str) -> bool:
     """Сохранить пользователя в GitHub"""
     global GITHUB_TOKEN
@@ -425,9 +405,6 @@ async def get_all_nicks() -> List[Dict]:
     return all_nicks
 
 # ========== ФУНКЦИИ ИНТЕРФЕЙСА ==========
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
-
 def get_main_menu():
     """Меню для администратора"""
     keyboard = [
@@ -722,19 +699,35 @@ async def download_csv(update: Update, context: CallbackContext):
 
 # ========== ОСНОВНАЯ ФУНКЦИЯ ==========
 def main():
-    """Точка входа - запускаем бота"""
-    # Синхронно инициализируем Supabase
+    """Основная функция запуска бота"""
+    global GITHUB_TOKEN
+    
+    print("=" * 60)
+    print("🚀 Telegram Bot with Supabase")
+    print("=" * 60)
+    print(f"✅ BOT_TOKEN: {'Настроен' if TOKEN else 'Нет'}")
+    print(f"✅ SUPABASE_URL: {SUPABASE_URL}")
+    print(f"✅ PROJECT_ID: {SUPABASE_PROJECT_ID}")
+    print(f"🔑 SUPABASE_KEY: {SUPABASE_KEY[:20]}...")
+    print(f"👑 Админ ID: {ADMIN_ID}")
+    print(f"👤 Репозиторий: {GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}")
+    print("=" * 60)
+    
+    # СИНХРОННО загружаем токен из Supabase
     print("🔄 Инициализация подключения к Supabase...")
-    
-    # Создаем новый event loop для инициализации
-    init_loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(init_loop)
-    
     try:
-        # Инициализируем Supabase синхронно
-        init_loop.run_until_complete(init_supabase())
-    finally:
-        init_loop.close()
+        # Проверяем подключение
+        if check_supabase_connection_sync():
+            # Загружаем токен
+            GITHUB_TOKEN = get_github_token_from_supabase_sync()
+            if GITHUB_TOKEN:
+                print(f"✅ GitHub токен загружен из Supabase: {GITHUB_TOKEN[:10]}...")
+            else:
+                print("⚠️ GitHub токен не найден в Supabase")
+        else:
+            print("❌ Не удалось подключиться к Supabase")
+    except Exception as e:
+        print(f"❌ Ошибка инициализации Supabase: {e}")
     
     print("=" * 60)
     print("🤖 Telegram Bot with Supabase Integration")
@@ -763,4 +756,9 @@ def main():
     application.run_polling()
 
 if __name__ == '__main__':
-    main()
+    # Устанавливаем обработчик для корректного завершения
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n👋 Бот остановлен")
+        sys.exit(0)
