@@ -8,6 +8,7 @@ import base64
 import asyncio
 from typing import Dict, List, Optional
 import aiohttp
+from supabase import create_client, Client
 
 # Настройка логирования
 logging.basicConfig(
@@ -17,55 +18,135 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ========== КОНФИГУРАЦИЯ ==========
-GITHUB_TOKEN = "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"
+# Токен Telegram бота (остается в коде)
 TOKEN = "8199840666:AAEMBSi3Y-SIN8cQqnBVso2B7fCKh7fb-Uk"
+
+# Настройки GitHub репозитория (остаются в коде)
 GITHUB_REPO_OWNER = "reduk000002-afk"
 GITHUB_REPO_NAME = "tgbot"
 
-# ИЛИ используй переменные окружения
-if os.getenv("GITHUB_TOKEN"):
-    GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-if os.getenv("BOT_TOKEN"):
-    TOKEN = os.getenv("BOT_TOKEN")
-if os.getenv("GITHUB_REPO_OWNER"):
-    GITHUB_REPO_OWNER = os.getenv("GITHUB_REPO_OWNER")
-if os.getenv("GITHUB_REPO_NAME"):
-    GITHUB_REPO_NAME = os.getenv("GITHUB_REPO_NAME")
-
-# Логин и пароль
+# Данные для авторизации (остаются в коде)
 VALID_LOGIN = "test"
 VALID_PASSWORD = "12345"
 
-# Твой Telegram ID
+# ID администратора (остается в коде)
 ADMIN_ID = "7333863565"
 
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
+# ========== SUPABASE КОНФИГУРАЦИЯ ==========
+SUPABASE_URL = "https://wkukgnkfbxgpvlraczeu.supabase.co"
+SUPABASE_KEY = "sb_publishable_11WBFNEcbspv1yDyfxq7sQ_Nl51ew5i"
+SUPABASE_TABLE = "github_tokens"
 
-# ========== НАСТРОЙКИ GITHUB ==========
-GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/contents"
+# Инициализация Supabase клиента
+supabase: Optional[Client] = None
+try:
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    logger.info("✅ Supabase клиент успешно инициализирован")
+except Exception as e:
+    logger.error(f"❌ Ошибка инициализации Supabase: {e}")
+    supabase = None
+
+# ========== ФУНКЦИИ ДЛЯ РАБОТЫ С SUPABASE ==========
+async def get_github_token_from_supabase() -> Optional[str]:
+    """Получить GitHub токен из Supabase"""
+    global supabase
+    
+    if not supabase:
+        logger.error("❌ Supabase клиент не инициализирован")
+        return None
+    
+    try:
+        # Получаем самый последний активный токен
+        response = supabase.table(SUPABASE_TABLE)\
+            .select("github_token")\
+            .eq("is_active", True)\
+            .order("created_at", desc=True)\
+            .limit(1)\
+            .execute()
+        
+        if response.data and len(response.data) > 0:
+            token = response.data[0].get("github_token")
+            if token:
+                logger.info("✅ GitHub токен успешно получен из Supabase")
+                return token
+            else:
+                logger.error("❌ Токен не найден в данных Supabase")
+                return None
+        else:
+            logger.error("❌ Нет активных токенов в Supabase")
+            return None
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка при получении токена из Supabase: {e}")
+        return None
+
+async def update_github_token_in_supabase(new_token: str) -> bool:
+    """Обновить GitHub токен в Supabase (для администратора)"""
+    global supabase
+    
+    if not supabase:
+        logger.error("❌ Supabase клиент не инициализирован")
+        return False
+    
+    try:
+        # Деактивируем все старые токены
+        supabase.table(SUPABASE_TABLE)\
+            .update({"is_active": False})\
+            .eq("is_active", True)\
+            .execute()
+        
+        # Добавляем новый токен
+        response = supabase.table(SUPABASE_TABLE)\
+            .insert({
+                "github_token": new_token,
+                "token_name": "main",
+                "description": "Обновленный через бота",
+                "is_active": True
+            })\
+            .execute()
+        
+        if response.data:
+            logger.info("✅ GitHub токен успешно обновлен в Supabase")
+            return True
+        else:
+            logger.error("❌ Ошибка при добавлении нового токена")
+            return False
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка при обновлении токена в Supabase: {e}")
+        return False
+
+# ========== ОСНОВНЫЕ ПЕРЕМЕННЫЕ ==========
+GITHUB_TOKEN = None  # Будет загружаться из Supabase при старте
+_local_users = {}
+_local_nicks = {}
+
+# ========== GITHUB НАСТРОЙКИ ==========
 NICKS_FILE_PATH = "nicks_database.json"
 USERS_FILE_PATH = "users_database.json"
 
 print("=" * 60)
-print("🚀 Telegram Bot with GitHub Storage")
+print("🚀 Telegram Bot with Supabase & GitHub Storage")
 print("=" * 60)
 print(f"✅ BOT_TOKEN: {'Настроен' if TOKEN else 'Нет'}")
-print(f"✅ GITHUB_TOKEN: {'Настроен' if GITHUB_TOKEN else 'Нет'}")
+print(f"✅ SUPABASE_URL: {SUPABASE_URL[:30]}...")
 print(f"👑 Админ ID: {ADMIN_ID}")
 print(f"👤 Репозиторий: {GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}")
 print("=" * 60)
 
 # ========== УПРОЩЕННЫЕ ФУНКЦИИ ==========
-_local_users = {}
-_local_nicks = {}
-
 async def save_user(telegram_id: str, login: str, name: str) -> bool:
     """Сохранить пользователя в GitHub"""
+    global GITHUB_TOKEN
+    
     logger.info(f"Сохранение пользователя: {telegram_id}, логин: {login}, имя: {name}")
     
+    # Получаем токен из Supabase если еще не загружен
     if not GITHUB_TOKEN:
-        logger.error("❌ GITHUB_TOKEN не настроен! Сохраняю локально")
+        GITHUB_TOKEN = await get_github_token_from_supabase()
+    
+    if not GITHUB_TOKEN:
+        logger.error("❌ GitHub токен не получен из Supabase! Сохраняю локально")
         _local_users[telegram_id] = {
             'login': login,
             'name': name,
@@ -77,7 +158,7 @@ async def save_user(telegram_id: str, login: str, name: str) -> bool:
         headers = {'Authorization': f'token {GITHUB_TOKEN}'}
         users_data = {"users": {}, "total": 0, "updated": datetime.datetime.now().isoformat()}
         
-        url = f"{GITHUB_API_URL}/{USERS_FILE_PATH}"
+        url = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/contents/{USERS_FILE_PATH}"
         async with aiohttp.ClientSession() as session:
             # Пробуем загрузить существующий файл
             try:
@@ -147,7 +228,13 @@ async def get_user(telegram_id: str) -> Optional[Dict]:
 
 async def save_nick(nick: str, manager_id: str, manager_name: str) -> bool:
     """Сохранить ник в GitHub"""
+    global GITHUB_TOKEN
+    
     logger.info(f"Попытка сохранения ника '{nick}' для пользователя {manager_name}")
+    
+    # Получаем токен из Supabase если еще не загружен
+    if not GITHUB_TOKEN:
+        GITHUB_TOKEN = await get_github_token_from_supabase()
     
     # Сначала загружаем текущие ники с GitHub
     nicks_data = {"nicks": {}, "total": 0, "updated": datetime.datetime.now().isoformat()}
@@ -155,7 +242,7 @@ async def save_nick(nick: str, manager_id: str, manager_name: str) -> bool:
     if GITHUB_TOKEN:
         try:
             headers = {'Authorization': f'token {GITHUB_TOKEN}'}
-            url = f"{GITHUB_API_URL}/{NICKS_FILE_PATH}"
+            url = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/contents/{NICKS_FILE_PATH}"
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers) as response:
@@ -202,7 +289,7 @@ async def save_nick(nick: str, manager_id: str, manager_name: str) -> bool:
             # Получаем sha файла
             sha = None
             headers = {'Authorization': f'token {GITHUB_TOKEN}'}
-            url = f"{GITHUB_API_URL}/{NICKS_FILE_PATH}"
+            url = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/contents/{NICKS_FILE_PATH}"
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers) as response:
@@ -243,11 +330,16 @@ async def get_nick(nick: str) -> Optional[Dict]:
 
 async def get_all_nicks() -> List[Dict]:
     """Получить все ники"""
+    global GITHUB_TOKEN
+    
     # Загружаем с GitHub при первом обращении
+    if not GITHUB_TOKEN:
+        GITHUB_TOKEN = await get_github_token_from_supabase()
+    
     if GITHUB_TOKEN and not _local_nicks:
         try:
             headers = {'Authorization': f'token {GITHUB_TOKEN}'}
-            url = f"{GITHUB_API_URL}/{NICKS_FILE_PATH}"
+            url = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/contents/{NICKS_FILE_PATH}"
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers) as response:
@@ -276,6 +368,9 @@ async def get_all_nicks() -> List[Dict]:
     return all_nicks
 
 # ========== ФУНКЦИИ ИНТЕРФЕЙСА ==========
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
+
 def get_main_menu():
     """Меню для администратора"""
     keyboard = [
@@ -285,6 +380,7 @@ def get_main_menu():
         [KeyboardButton("💾 Резервная копия")],
         [KeyboardButton("📥 Скачать базу")],
         [KeyboardButton("🌐 Показать GitHub файл")],
+        [KeyboardButton("⚙️ Обновить GitHub токен")],
         [KeyboardButton("❌ Выход")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -307,11 +403,21 @@ async def start(update: Update, context: CallbackContext):
     
     logger.info(f"Команда /start от {user_id} ({user_name})")
     
+    # Пытаемся загрузить GitHub токен при старте
+    global GITHUB_TOKEN
+    if not GITHUB_TOKEN:
+        GITHUB_TOKEN = await get_github_token_from_supabase()
+        if GITHUB_TOKEN:
+            logger.info("✅ GitHub токен загружен из Supabase при старте")
+        else:
+            logger.warning("⚠️ GitHub токен не загружен из Supabase")
+    
     user_data = await get_user(user_id)
     if user_data:
         if user_id == ADMIN_ID:
             await update.message.reply_text(
-                f"✅ Добро пожаловать, Администратор!",
+                f"✅ Добро пожаловать, Администратор!\n"
+                f"📊 GitHub токен: {'✅ Загружен' if GITHUB_TOKEN else '❌ Отсутствует'}",
                 reply_markup=get_main_menu()
             )
         else:
@@ -357,7 +463,8 @@ async def handle_text(update: Update, context: CallbackContext):
                 
                 if user_id == ADMIN_ID:
                     await update.message.reply_text(
-                        f"✅ Авторизация успешна! Администратор!",
+                        f"✅ Авторизация успешна! Администратор!\n"
+                        f"📊 GitHub токен: {'✅ Загружен' if GITHUB_TOKEN else '❌ Отсутствует'}",
                         reply_markup=get_main_menu()
                     )
                 else:
@@ -424,11 +531,27 @@ async def handle_text(update: Update, context: CallbackContext):
             if GITHUB_TOKEN:
                 file_url = f"https://github.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/blob/main/{NICKS_FILE_PATH}"
                 await update.message.reply_text(
-                    f"📁 Файл с никами на GitHub:\n{file_url}",
+                    f"📁 Файл с никами на GitHub:\n{file_url}\n"
+                    f"📊 GitHub токен: ✅ Загружен из Supabase",
                     reply_markup=current_menu
                 )
             else:
-                await update.message.reply_text("❌ GitHub не настроен", reply_markup=current_menu)
+                await update.message.reply_text(
+                    "❌ GitHub токен не загружен из Supabase\n"
+                    "Проверьте подключение к Supabase или наличие токена в таблице",
+                    reply_markup=current_menu
+                )
+        else:
+            await update.message.reply_text("❌ Только для администратора")
+    
+    elif text == "⚙️ Обновить GitHub токен":
+        if user_id == ADMIN_ID:
+            await update.message.reply_text(
+                "Введите новый GitHub токен (начинается с ghp_...):\n"
+                "⚠️ Внимание: старый токен будет деактивирован",
+                reply_markup=ReplyKeyboardMarkup([[KeyboardButton("❌ Отмена")]], resize_keyboard=True)
+            )
+            context.user_data['mode'] = 'update_github_token'
         else:
             await update.message.reply_text("❌ Только для администратора")
     
@@ -437,6 +560,37 @@ async def handle_text(update: Update, context: CallbackContext):
             "👋 Вы вышли. Используйте /start для входа", 
             reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/start")]], resize_keyboard=True)
         )
+    
+    # Режим обновления GitHub токена
+    elif context.user_data.get('mode') == 'update_github_token':
+        if text == "❌ Отмена":
+            await update.message.reply_text("❌ Обновление токена отменено", reply_markup=current_menu)
+            context.user_data.pop('mode', None)
+            return
+        
+        if text.startswith("ghp_"):
+            success = await update_github_token_in_supabase(text)
+            if success:
+                global GITHUB_TOKEN
+                GITHUB_TOKEN = text  # Обновляем в памяти
+                await update.message.reply_text(
+                    f"✅ GitHub токен успешно обновлен в Supabase!\n"
+                    f"Новый токен: {text[:10]}...",
+                    reply_markup=current_menu
+                )
+            else:
+                await update.message.reply_text(
+                    "❌ Ошибка обновления токена в Supabase\n"
+                    "Проверьте подключение или права доступа",
+                    reply_markup=current_menu
+                )
+        else:
+            await update.message.reply_text(
+                "❌ Неверный формат токена!\n"
+                "GitHub токен должен начинаться с 'ghp_'\n"
+                "Попробуйте еще раз или нажмите '❌ Отмена'"
+            )
+        context.user_data.pop('mode', None)
     
     # Режим проверки ника
     elif context.user_data.get('mode') == 'check_nick':
@@ -461,7 +615,8 @@ async def handle_text(update: Update, context: CallbackContext):
                     all_nicks = await get_all_nicks()
                     await update.message.reply_text(
                         f"✅ Ник '{nick}' свободен и закреплен!\n"
-                        f"📊 Всего ников в базе: {len(all_nicks)}"
+                        f"📊 Всего ников в базе: {len(all_nicks)}\n"
+                        f"📡 Сохранено в: {'GitHub' if GITHUB_TOKEN else 'локальное хранилище'}"
                     )
                 else:
                     await update.message.reply_text("❌ Ошибка сохранения. Возможно, ник уже занят.")
@@ -494,7 +649,7 @@ async def download_csv(update: Update, context: CallbackContext):
             nick_info['nick'],
             nick_info['manager'],
             nick_info['date'],
-            'GitHub' if GITHUB_TOKEN else 'Локальное'
+            'GitHub + Supabase' if GITHUB_TOKEN else 'Локальное'
         ])
     
     bio = io.BytesIO(output.getvalue().encode('utf-8'))
@@ -502,7 +657,8 @@ async def download_csv(update: Update, context: CallbackContext):
     
     await update.message.reply_document(
         document=bio,
-        caption=f"📊 База ников\n✅ Записей: {len(all_nicks)}"
+        caption=f"📊 База ников\n✅ Записей: {len(all_nicks)}\n"
+                f"📡 Источник токена: {'Supabase' if GITHUB_TOKEN else 'Локальный'}"
     )
 
 # ========== ОСНОВНАЯ ФУНКЦИЯ ==========
@@ -515,10 +671,20 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     
-    print("🤖 Telegram бот запущен и готов к работе")
+    print("=" * 60)
+    print("🤖 Telegram Bot with Supabase Integration")
+    print("=" * 60)
+    print(f"✅ BOT_TOKEN: Настроен")
+    print(f"✅ SUPABASE_URL: {SUPABASE_URL}")
+    print(f"✅ SUPABASE_TABLE: {SUPABASE_TABLE}")
+    print(f"👑 Админ ID: {ADMIN_ID}")
+    print(f"👤 Репозиторий: {GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}")
+    print(f"🔑 GitHub токен: Будет загружен из Supabase")
+    print("=" * 60)
     print("📲 Используйте /start в Telegram для начала работы")
     print("ℹ️  Логин: test, пароль: 12345")
     print("⚠️  Проверяй логи в Railway для отладки!")
+    print("=" * 60)
     
     # Запускаем бота
     application.run_polling()
