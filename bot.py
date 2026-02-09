@@ -532,10 +532,27 @@ async def handle_text(update: Update, context: CallbackContext):
     user_login = user_data['login']
     current_menu = get_main_menu() if user_id == ADMIN_ID else get_user_menu()
     
-    # Обработка меню
+    # Проверка: если мы в режиме проверки ников - обрабатываем как ник
+    if context.user_data.get('mode') == 'check_nick':
+        # Если пользователь выбрал пункт меню - выходим из режима проверки
+        if text in ["🔍 Проверка ников", "📊 Мои ники", "📝 Отправить отчет", "💾 Скачать базу", 
+                    "⚙️ Обновить GitHub токен", "📋 Список пользователей", "❌ Выход"]:
+            context.user_data.pop('mode', None)
+            # Обрабатываем как обычный пункт меню
+        else:
+            # Обрабатываем как ник
+            await process_nick_check(update, context, text, user_login, user_data['name'], current_menu)
+            return
+    
+    # Обработка меню (только если не в режиме проверки ников)
     if text == "🔍 Проверка ников":
-        await update.message.reply_text("Введите ник для проверки:")
         context.user_data['mode'] = 'check_nick'
+        await update.message.reply_text(
+            "✅ Режим проверки ников активирован!\n"
+            "Теперь можете отправлять ники подряд.\n"
+            "Для выхода из режима выберите другой пункт меню.\n\n"
+            "Введите первый ник для проверки:"
+        )
     
     elif text == "📊 Мои ники":
         # Показываем только ники текущего пользователя
@@ -628,37 +645,6 @@ async def handle_text(update: Update, context: CallbackContext):
             )
         context.user_data.pop('mode', None)
     
-    # Режим проверки ника
-    elif context.user_data.get('mode') == 'check_nick':
-        nick = text.strip().lower()
-        if nick:
-            user_name = user_data['name']
-            
-            # Проверяем ник
-            is_taken, owner_login = await check_nick_on_github(nick)
-            
-            if is_taken:
-                if owner_login == user_login:
-                    await update.message.reply_text(f"❌ Ник '{nick}' уже проверен вами ранее.")
-                else:
-                    await update.message.reply_text(f"❌ Ник '{nick}' уже занят.")
-            else:
-                # Сохраняем новый ник
-                success = await save_nick_to_github(nick, user_login, user_name)
-                if success:
-                    user_nicks = await get_user_nicks_from_github(user_login)
-                    await update.message.reply_text(
-                        f"✅ Ник '{nick}' свободен и закреплен за вами!\n"
-                        f"📊 Всего ваших ников: {len(user_nicks)}"
-                    )
-                else:
-                    await update.message.reply_text("❌ Ошибка сохранения. Возможно, ник уже занят.")
-        else:
-            await update.message.reply_text("❌ Ник не может быть пустым.")
-        
-        context.user_data.pop('mode', None)
-        await update.message.reply_text("Выберите действие из меню:", reply_markup=current_menu)
-    
     # Режим отчета
     elif context.user_data.get('mode') == 'report':
         if text.strip():
@@ -667,6 +653,37 @@ async def handle_text(update: Update, context: CallbackContext):
             await update.message.reply_text("❌ Отчет не может быть пустым!", reply_markup=current_menu)
         
         context.user_data.pop('mode', None)
+
+async def process_nick_check(update: Update, context: CallbackContext, nick: str, user_login: str, user_name: str, current_menu):
+    """Обработать проверку ника"""
+    nick = nick.strip().lower()
+    
+    if not nick:
+        await update.message.reply_text("❌ Ник не может быть пустым. Введите ник:", reply_markup=current_menu)
+        return
+    
+    # Проверяем ник
+    is_taken, owner_login = await check_nick_on_github(nick)
+    
+    if is_taken:
+        if owner_login == user_login:
+            await update.message.reply_text(f"❌ Ник '{nick}' уже проверен вами ранее.")
+        else:
+            await update.message.reply_text(f"❌ Ник '{nick}' уже занят.")
+    else:
+        # Сохраняем новый ник
+        success = await save_nick_to_github(nick, user_login, user_name)
+        if success:
+            user_nicks = await get_user_nicks_from_github(user_login)
+            await update.message.reply_text(
+                f"✅ Ник '{nick}' свободен и закреплен за вами!\n"
+                f"📊 Всего ваших ников: {len(user_nicks)}"
+            )
+        else:
+            await update.message.reply_text("❌ Ошибка сохранения. Возможно, ник уже занят.")
+    
+    # Не выходим из режима проверки - ждем следующий ник
+    await update.message.reply_text("Введите следующий ник для проверки (или выберите другой пункт меню):")
 
 async def download_csv(update: Update, context: CallbackContext):
     """Скачать базу в CSV (только для администратора)"""
@@ -736,7 +753,7 @@ def main():
     global GITHUB_TOKEN
     
     print("=" * 60)
-    print("🤖 Telegram Bot - Личная история ников")
+    print("🤖 Telegram Bot - Режим проверки ников")
     print("=" * 60)
     print(f"✅ BOT_TOKEN: Настроен")
     print(f"👑 Админ ID: {ADMIN_ID}")
@@ -745,7 +762,7 @@ def main():
     print("=" * 60)
     print("📲 Используйте /start в Telegram для начала работы")
     print("ℹ️  Логин: любой из пользователей, пароль: соответствующий")
-    print("💡 Каждый видит ТОЛЬКО свою историю ников!")
+    print("💡 Режим проверки ников остается активным пока не выберите другой пункт!")
     print("=" * 60)
     
     # Загружаем токен из Supabase
