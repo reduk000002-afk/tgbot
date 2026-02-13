@@ -132,8 +132,11 @@ SUPABASE_TABLE = "github_tokens"
 
 # ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
 GITHUB_TOKEN = None
-_local_users = {}
+_local_users = {}  # {telegram_id: {login, name, auth_date}}
 _local_nicks = {}
+
+# ========== ФАЙЛ ДЛЯ ХРАНЕНИЯ АВТОРИЗАЦИЙ ==========
+AUTH_FILE = "auth_database.json"
 
 # ========== НАСТРОЙКА ЛОГИРОВАНИЯ ==========
 logging.basicConfig(
@@ -144,6 +147,33 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+# ========== ФУНКЦИИ ДЛЯ РАБОТЫ С ФАЙЛОМ АВТОРИЗАЦИЙ ==========
+def load_auth_database():
+    """Загрузить базу авторизаций из файла"""
+    global _local_users
+    try:
+        if os.path.exists(AUTH_FILE):
+            with open(AUTH_FILE, 'r', encoding='utf-8') as f:
+                _local_users = json.load(f)
+            logger.info(f"✅ Загружено {len(_local_users)} авторизаций из файла")
+        else:
+            logger.info("📁 Файл авторизаций не найден, создаем новый")
+            _local_users = {}
+    except Exception as e:
+        logger.error(f"❌ Ошибка загрузки авторизаций: {e}")
+        _local_users = {}
+
+def save_auth_database():
+    """Сохранить базу авторизаций в файл"""
+    try:
+        with open(AUTH_FILE, 'w', encoding='utf-8') as f:
+            json.dump(_local_users, f, ensure_ascii=False, indent=2)
+        logger.info(f"✅ Сохранено {len(_local_users)} авторизаций в файл")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Ошибка сохранения авторизаций: {e}")
+        return False
 
 # ========== СИНХРОННЫЕ ФУНКЦИИ ДЛЯ SUPABASE ==========
 def get_github_token_from_supabase_sync() -> Optional[str]:
@@ -261,20 +291,31 @@ async def update_github_token_in_supabase(new_token: str) -> bool:
     return update_github_token_in_supabase_sync(new_token)
 
 async def save_user(telegram_id: str, login: str, name: str) -> bool:
-    """Сохранить пользователя"""
+    """Сохранить пользователя в файл"""
     _local_users[telegram_id] = {
         'login': login,
         'name': name,
         'auth_date': datetime.datetime.now().isoformat()
     }
-    logger.info(f"✅ Пользователь {name} сохранен локально")
+    # Сохраняем в файл
+    save_auth_database()
+    logger.info(f"✅ Пользователь {name} сохранен в файл авторизаций")
     return True
 
 async def get_user(telegram_id: str) -> Optional[Dict]:
-    """Получить пользователя"""
+    """Получить пользователя из памяти"""
     if telegram_id in _local_users:
         return _local_users[telegram_id]
     return None
+
+async def logout_user(telegram_id: str) -> bool:
+    """Удалить пользователя из авторизации"""
+    if telegram_id in _local_users:
+        del _local_users[telegram_id]
+        save_auth_database()
+        logger.info(f"✅ Пользователь {telegram_id} вышел")
+        return True
+    return False
 
 async def save_nick_to_github(nick: str, user_login: str, user_name: str) -> bool:
     """Сохранить ник в GitHub"""
@@ -463,20 +504,25 @@ async def start(update: Update, context: CallbackContext):
     
     logger.info(f"Команда /start от {user_id} ({user_name})")
     
+    # Проверяем, есть ли пользователь в сохраненных авторизациях
     user_data = await get_user(user_id)
+    
     if user_data:
+        # Пользователь уже авторизован
+        logger.info(f"✅ Пользователь {user_id} уже авторизован как {user_data['login']}")
         if user_id == ADMIN_ID:
             await update.message.reply_text(
-                f"✅ Добро пожаловать, Администратор!\n"
+                f"✅ С возвращением, Администратор!\n"
                 f"👥 Всего пользователей: {len(USERS_DATABASE)}",
                 reply_markup=get_main_menu()
             )
         else:
             await update.message.reply_text(
-                f"✅ Добро пожаловать, {user_data['name']}!",
+                f"✅ С возвращением, {user_data['name']}!",
                 reply_markup=get_user_menu()
             )
     else:
+        # Новый пользователь - запрашиваем логин
         context.user_data['auth_step'] = 'login'
         await update.message.reply_text("Введите логин:")
 
@@ -486,6 +532,14 @@ async def handle_text(update: Update, context: CallbackContext):
     text = update.message.text.strip()
     
     logger.info(f"Сообщение от {user_id}: '{text}'")
+    
+    # Всегда проверяем авторизацию первым делом (кроме процесса авторизации)
+    if 'auth_step' not in context.user_data:
+        user_data = await get_user(user_id)
+        if not user_data:
+            # Пользователь не авторизован - отправляем на /start
+            await update.message.reply_text("❌ Сессия истекла. Используйте /start для входа")
+            return
     
     # Авторизация
     if 'auth_step' in context.user_data:
@@ -503,9 +557,11 @@ async def handle_text(update: Update, context: CallbackContext):
             if check_credentials(login, text):
                 user_name = update.effective_user.full_name
                 
+                # Сохраняем пользователя в файл (навсегда)
                 await save_user(user_id, login, user_name)
                 logger.info(f"✅ Авторизация успешна для {user_name}")
                 
+                # Очищаем временные данные
                 context.user_data.clear()
                 
                 if user_id == ADMIN_ID:
@@ -523,13 +579,15 @@ async def handle_text(update: Update, context: CallbackContext):
                 context.user_data.clear()
         return
     
-    # Проверяем авторизацию
+    # Получаем данные пользователя
     user_data = await get_user(user_id)
     if not user_data:
-        await update.message.reply_text("❌ Требуется авторизация. /start")
+        # Этого не должно случиться из-за проверки выше, но на всякий случай
+        await update.message.reply_text("❌ Ошибка авторизации. Используйте /start")
         return
     
     user_login = user_data['login']
+    user_name = user_data['name']
     current_menu = get_main_menu() if user_id == ADMIN_ID else get_user_menu()
     
     # Проверка: если мы в режиме проверки ников - обрабатываем как ник
@@ -538,10 +596,10 @@ async def handle_text(update: Update, context: CallbackContext):
         if text in ["🔍 Проверка ников", "📊 Мои ники", "📝 Отправить отчет", "💾 Скачать базу", 
                     "⚙️ Обновить GitHub токен", "📋 Список пользователей", "❌ Выход"]:
             context.user_data.pop('mode', None)
-            # Обрабатываем как обычный пункт меню
+            # Обрабатываем как обычный пункт меню дальше
         else:
             # Обрабатываем как ник
-            await process_nick_check(update, context, text, user_login, user_data['name'], current_menu)
+            await process_nick_check(update, context, text, user_login, user_name, current_menu)
             return
     
     # Обработка меню (только если не в режиме проверки ников)
@@ -613,6 +671,8 @@ async def handle_text(update: Update, context: CallbackContext):
             await update.message.reply_text("❌ Только для администратора")
     
     elif text == "❌ Выход":
+        # Удаляем пользователя из авторизации
+        await logout_user(user_id)
         await update.message.reply_text(
             "👋 Вы вышли. Используйте /start для входа", 
             reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/start")]], resize_keyboard=True)
@@ -659,7 +719,7 @@ async def process_nick_check(update: Update, context: CallbackContext, nick: str
     nick = nick.strip().lower()
     
     if not nick:
-        await update.message.reply_text("❌ Ник не может быть пустым. Введите ник:", reply_markup=current_menu)
+        await update.message.reply_text("❌ Ник не может быть пустым. Введите ник:")
         return
     
     # Проверяем ник
@@ -753,17 +813,18 @@ def main():
     global GITHUB_TOKEN
     
     print("=" * 60)
-    print("🤖 Telegram Bot - Режим проверки ников")
+    print("🤖 Telegram Bot - Постоянная авторизация")
     print("=" * 60)
     print(f"✅ BOT_TOKEN: Настроен")
     print(f"👑 Админ ID: {ADMIN_ID}")
     print(f"👤 Репозиторий: {GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}")
     print(f"👥 Всего пользователей: {len(USERS_DATABASE)}")
     print("=" * 60)
-    print("📲 Используйте /start в Telegram для начала работы")
-    print("ℹ️  Логин: любой из пользователей, пароль: соответствующий")
-    print("💡 Режим проверки ников остается активным пока не выберите другой пункт!")
-    print("=" * 60)
+    
+    # Загружаем сохраненные авторизации
+    print("🔄 Загрузка базы авторизаций...")
+    load_auth_database()
+    print(f"✅ Загружено {len(_local_users)} активных сессий")
     
     # Загружаем токен из Supabase
     print("🔄 Загрузка GitHub токена из Supabase...")
@@ -775,6 +836,12 @@ def main():
             print("⚠️ GitHub токен не найден")
     except Exception as e:
         print(f"❌ Ошибка загрузки токена: {e}")
+    
+    print("=" * 60)
+    print("📲 Используйте /start в Telegram для начала работы")
+    print("ℹ️  Логин: любой из пользователей, пароль: соответствующий")
+    print("💡 Авторизация сохраняется навсегда до нажатия 'Выход'!")
+    print("=" * 60)
     
     # Создаем и настраиваем приложение бота
     application = Application.builder().token(TOKEN).build()
@@ -791,4 +858,6 @@ if __name__ == '__main__':
         main()
     except KeyboardInterrupt:
         print("\n👋 Бот остановлен")
+        # Сохраняем авторизации при остановке
+        save_auth_database()
         sys.exit(0)
